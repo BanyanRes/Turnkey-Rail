@@ -153,13 +153,38 @@ CREATE INDEX IF NOT EXISTS idx_tasks_project ON schedule_tasks(project_id);
 
 -- Application users (for admin UI; basic auth credentials beyond env vars)
 -- Env-var users (BASIC_AUTH_USERS) are always admin and not stored here.
+--
+-- permissions is a JSON blob with this shape:
+--   { admin: 'full'|'none',
+--     projects|schedule|vendors|payapps|changeorders|documents: 'full'|'read'|'none' }
+-- is_admin column kept for backward compat; mirrors (permissions.admin === 'full').
 CREATE TABLE IF NOT EXISTS users (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   username      TEXT    NOT NULL UNIQUE,
   password_hash TEXT    NOT NULL,            -- bcrypt
-  is_admin      INTEGER NOT NULL DEFAULT 0,  -- 0/1
+  is_admin      INTEGER NOT NULL DEFAULT 0,  -- 0/1, mirrors permissions.admin
+  email         TEXT,                        -- captured from invitation (nullable)
+  permissions   TEXT    NOT NULL DEFAULT '{}',  -- JSON; see comment above
   created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
+
+-- Pending invitations. Admin issues one with email + permissions; system
+-- generates a single-use token. User visits /invite/<token>, picks username
+-- + password, and a row is inserted into users (permissions copied over).
+CREATE TABLE IF NOT EXISTS invitations (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  email             TEXT    NOT NULL,
+  token             TEXT    NOT NULL UNIQUE,    -- 64-char hex (crypto.randomBytes(32))
+  permissions       TEXT    NOT NULL DEFAULT '{}',
+  created_by        TEXT,                       -- username of admin who issued it
+  expires_at        TEXT    NOT NULL,           -- ISO datetime
+  accepted_at       TEXT,                       -- null until accepted
+  accepted_user_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token);
+CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);

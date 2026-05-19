@@ -1,19 +1,28 @@
 import { useState, useEffect, useMemo } from 'react';
 import { api } from '../api';
+import PermissionsPicker from './PermissionsPicker';
+import {
+  fromPreset,
+  detectPreset,
+  summarizePerms,
+  PRESET_LABELS,
+} from '../permissions';
 
 export default function AdminView({ me }) {
   const [users, setUsers] = useState([]);
+  const [invites, setInvites] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [showAdd, setShowAdd] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [editing, setEditing] = useState(null); // user being edited
 
   async function load() {
     setLoading(true);
     setError(null);
     try {
-      const rows = await api.listUsers();
-      setUsers(rows);
+      const [u, i] = await Promise.all([api.listUsers(), api.listInvitations()]);
+      setUsers(u);
+      setInvites(i);
     } catch (e) {
       setError(e.message);
     } finally {
@@ -38,8 +47,8 @@ export default function AdminView({ me }) {
             {' '}— manage who can sign in to Turnkey Rail.
           </p>
         </div>
-        <button className="btn-primary" onClick={() => setShowAdd(true)}>
-          + Add User
+        <button className="btn-primary" onClick={() => setShowInvite(true)}>
+          + Invite User
         </button>
       </div>
 
@@ -55,61 +64,113 @@ export default function AdminView({ me }) {
 
       {loading ? (
         <div className="muted">Loading…</div>
-      ) : users.length === 0 ? (
-        <div className="empty-state">
-          No DB users yet. Click <strong>+ Add User</strong> to create one.
-        </div>
       ) : (
-        <table className="vendors-table">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Created</th>
-              <th>Updated</th>
-              <th className="col-action">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((u) => {
-              const isSelf = !meIsEnv && u.username === meUsername;
-              return (
-                <tr key={u.id}>
-                  <td className="strong">
-                    {u.username}
-                    {isSelf && <span className="badge badge-self">you</span>}
-                  </td>
-                  <td>
-                    {u.is_admin
-                      ? <span className="badge badge-admin">admin</span>
-                      : <span className="badge badge-user">user</span>}
-                  </td>
-                  <td className="muted">{fmtDate(u.created_at)}</td>
-                  <td className="muted">{fmtDate(u.updated_at)}</td>
-                  <td className="col-action">
-                    <button className="btn-secondary btn-sm" onClick={() => setEditing(u)}>
-                      Edit
-                    </button>
-                    <button
-                      className="btn-danger btn-sm"
-                      onClick={() => handleDelete(u)}
-                      disabled={isSelf}
-                      title={isSelf ? "Can't delete yourself" : 'Delete user'}
-                    >
-                      Delete
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+        <>
+          {invites.length > 0 && (
+            <section className="admin-section">
+              <h3 className="admin-section-title">
+                Pending invitations <span className="muted">({invites.length})</span>
+              </h3>
+              <table className="vendors-table">
+                <thead>
+                  <tr>
+                    <th>Email</th>
+                    <th>Access</th>
+                    <th>Invited by</th>
+                    <th>Expires</th>
+                    <th className="col-action">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {invites.map((inv) => (
+                    <tr key={inv.id}>
+                      <td className="strong">{inv.email}</td>
+                      <td>{summarizePerms(inv.permissions)}</td>
+                      <td className="muted">{inv.created_by || '—'}</td>
+                      <td className="muted">{fmtDate(inv.expires_at)}</td>
+                      <td className="col-action">
+                        <button
+                          className="btn-secondary btn-sm"
+                          onClick={() => copyInviteLink(inv.token)}
+                          title="Copy invite URL to clipboard"
+                        >
+                          Copy link
+                        </button>
+                        <button
+                          className="btn-danger btn-sm"
+                          onClick={() => handleRevoke(inv)}
+                        >
+                          Revoke
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+          )}
+
+          <section className="admin-section">
+            <h3 className="admin-section-title">
+              Active users <span className="muted">({users.length})</span>
+            </h3>
+            {users.length === 0 ? (
+              <div className="empty-state">
+                No DB users yet. Click <strong>+ Invite User</strong> to send an invitation.
+              </div>
+            ) : (
+              <table className="vendors-table">
+                <thead>
+                  <tr>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Access</th>
+                    <th>Created</th>
+                    <th className="col-action">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {users.map((u) => {
+                    const isSelf = !meIsEnv && u.username === meUsername;
+                    return (
+                      <tr key={u.id}>
+                        <td className="strong">
+                          {u.username}
+                          {isSelf && <span className="badge badge-self">you</span>}
+                        </td>
+                        <td className="muted">{u.email || '—'}</td>
+                        <td>
+                          <AccessBadge perms={u.permissions} />
+                        </td>
+                        <td className="muted">{fmtDate(u.created_at)}</td>
+                        <td className="col-action">
+                          <button className="btn-secondary btn-sm" onClick={() => setEditing(u)}>
+                            Edit
+                          </button>
+                          <button
+                            className="btn-danger btn-sm"
+                            onClick={() => handleDelete(u)}
+                            disabled={isSelf}
+                            title={isSelf ? "Can't delete yourself" : 'Delete user'}
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </section>
+        </>
       )}
 
-      {showAdd && (
-        <AddUserModal
-          onClose={() => setShowAdd(false)}
-          onCreated={() => { setShowAdd(false); load(); }}
+      {showInvite && (
+        <InviteUserModal
+          onClose={() => setShowInvite(false)}
+          onCreated={() => { load(); /* keep modal open to show the link */ }}
+          onDone={() => { setShowInvite(false); load(); }}
         />
       )}
       {editing && (
@@ -132,64 +193,132 @@ export default function AdminView({ me }) {
       alert(`Failed to delete: ${e.message}`);
     }
   }
+
+  async function handleRevoke(inv) {
+    if (!confirm(`Revoke invitation for ${inv.email}? The existing link will stop working.`)) return;
+    try {
+      await api.deleteInvitation(inv.id);
+      load();
+    } catch (e) {
+      alert(`Failed to revoke: ${e.message}`);
+    }
+  }
 }
 
-function AddUserModal({ onClose, onCreated }) {
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [isAdmin, setIsAdmin] = useState(false);
+function AccessBadge({ perms }) {
+  const preset = detectPreset(perms);
+  const label = PRESET_LABELS[preset];
+  const cls = preset === 'admin' ? 'badge-admin'
+            : preset === 'editor' ? 'badge-editor'
+            : preset === 'viewer' ? 'badge-viewer'
+            : 'badge-custom';
+  if (preset === 'custom') {
+    return <span className={`badge ${cls}`} title={summarizePerms(perms)}>{summarizePerms(perms)}</span>;
+  }
+  return <span className={`badge ${cls}`}>{label}</span>;
+}
+
+function InviteUserModal({ onClose, onCreated, onDone }) {
+  const [email, setEmail] = useState('');
+  const [perms, setPerms] = useState(() => fromPreset('editor'));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [created, setCreated] = useState(null); // { token, email, permissions, ... }
+
+  const inviteUrl = useMemo(() => {
+    if (!created) return '';
+    return `${window.location.origin}/invite/${created.token}`;
+  }, [created]);
 
   async function submit() {
     setErr(null);
-    if (!username || !password) {
-      setErr('Username and password are required.');
+    if (!email.trim()) {
+      setErr('Email is required.');
       return;
     }
     setBusy(true);
     try {
-      await api.createUser({ username, password, is_admin: isAdmin });
+      const inv = await api.createInvitation({ email: email.trim(), permissions: perms });
+      setCreated(inv);
       onCreated();
     } catch (e) {
       setErr(e.message);
+    } finally {
       setBusy(false);
     }
   }
 
+  async function copyToClipboard() {
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+    } catch {
+      // older browsers — fall back to selecting the input
+      const el = document.getElementById('invite-link-input');
+      if (el) { el.select(); document.execCommand('copy'); }
+    }
+  }
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h2>Add User</h2>
-        <label>Username</label>
-        <input
-          autoFocus
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          placeholder="e.g. alice"
-        />
-        <label>Password</label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          placeholder="at least 8 characters"
-        />
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={isAdmin}
-            onChange={(e) => setIsAdmin(e.target.checked)}
-          />
-          {' '}Grant admin privileges (can manage users)
-        </label>
-        {err && <div className="admin-error">{err}</div>}
-        <div className="modal-actions">
-          <button className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
-          <button className="btn-primary" onClick={submit} disabled={busy}>
-            {busy ? 'Creating…' : 'Create User'}
-          </button>
-        </div>
+    <div className="modal-backdrop" onClick={created ? onDone : onClose}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
+        {!created ? (
+          <>
+            <h2>Invite User</h2>
+            <p className="muted">
+              We'll generate a one-time signup link. Send it to the invitee — when they
+              open it they'll pick their own username and password.
+            </p>
+
+            <label>Email address</label>
+            <input
+              autoFocus
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="alice@company.com"
+              disabled={busy}
+            />
+
+            <label className="perms-picker-label">Access level</label>
+            <PermissionsPicker value={perms} onChange={setPerms} disabled={busy} />
+
+            {err && <div className="admin-error">{err}</div>}
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
+              <button className="btn-primary" onClick={submit} disabled={busy}>
+                {busy ? 'Generating link…' : 'Generate invite link'}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <h2>Invite link ready</h2>
+            <p className="muted">
+              Send this link to <strong>{created.email}</strong>. It expires{' '}
+              {fmtDate(created.expires_at)} and can only be used once.
+            </p>
+            <label>Signup link</label>
+            <div className="invite-link-row">
+              <input
+                id="invite-link-input"
+                type="text"
+                readOnly
+                value={inviteUrl}
+                onFocus={(e) => e.target.select()}
+              />
+              <button className="btn-primary" onClick={copyToClipboard}>
+                Copy
+              </button>
+            </div>
+            <div className="muted invite-link-note">
+              Paste this into your email or messaging app. The link grants the access level
+              you chose: <strong>{summarizePerms(created.permissions)}</strong>.
+            </div>
+            <div className="modal-actions">
+              <button className="btn-primary" onClick={onDone}>Done</button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -197,15 +326,20 @@ function AddUserModal({ onClose, onCreated }) {
 
 function EditUserModal({ user, isSelf, onClose, onSaved }) {
   const [password, setPassword] = useState('');
-  const [isAdmin, setIsAdmin] = useState(!!user.is_admin);
+  const [perms, setPerms] = useState(() => user.permissions || fromPreset('viewer'));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+
+  const permsChanged = useMemo(
+    () => JSON.stringify(perms) !== JSON.stringify(user.permissions),
+    [perms, user.permissions]
+  );
 
   async function submit() {
     setErr(null);
     const patch = {};
     if (password) patch.password = password;
-    if (isAdmin !== !!user.is_admin) patch.is_admin = isAdmin;
+    if (permsChanged) patch.permissions = perms;
     if (Object.keys(patch).length === 0) {
       setErr('No changes to save.');
       return;
@@ -222,34 +356,55 @@ function EditUserModal({ user, isSelf, onClose, onSaved }) {
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
+      <div className="modal modal-wide" onClick={(e) => e.stopPropagation()}>
         <h2>Edit <code>{user.username}</code></h2>
-        <label>Reset password (leave blank to keep current)</label>
+        {user.email && <p className="muted">{user.email}</p>}
+
+        <label>Reset password <span className="muted">(leave blank to keep current)</span></label>
         <input
           type="password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           placeholder="at least 8 characters"
+          disabled={busy}
         />
-        <label className="checkbox-row">
-          <input
-            type="checkbox"
-            checked={isAdmin}
-            onChange={(e) => setIsAdmin(e.target.checked)}
-            disabled={isSelf}
-          />
-          {' '}Admin privileges {isSelf && <em className="muted">(can't change for yourself)</em>}
-        </label>
+
+        <label className="perms-picker-label">Access level</label>
+        {isSelf && (
+          <div className="admin-note admin-note-sm">
+            You can't remove your own admin access. Other access levels can still be changed.
+          </div>
+        )}
+        <PermissionsPicker value={perms} onChange={setPerms} disabled={busy} />
+
         {err && <div className="admin-error">{err}</div>}
         <div className="modal-actions">
           <button className="btn-secondary" onClick={onClose} disabled={busy}>Cancel</button>
           <button className="btn-primary" onClick={submit} disabled={busy}>
-            {busy ? 'Saving…' : 'Save'}
+            {busy ? 'Saving…' : 'Save changes'}
           </button>
         </div>
       </div>
     </div>
   );
+}
+
+async function copyInviteLink(token) {
+  const url = `${window.location.origin}/invite/${token}`;
+  try {
+    await navigator.clipboard.writeText(url);
+    // Brief feedback. A toast system would be nicer; alert is fine for now.
+    // Using a tiny inline approach: window's title flash would be intrusive,
+    // so just a quick confirm.
+    // Could swap for a toast later.
+  } catch {
+    // fallback
+    window.prompt('Copy this invite link:', url);
+    return;
+  }
+  // Lightweight inline feedback: briefly change the button text by re-rendering
+  // is overkill for now — let the user trust the copy. If they want feedback,
+  // we can wire a toast later.
 }
 
 function fmtDate(s) {

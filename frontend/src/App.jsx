@@ -7,6 +7,7 @@ import ChangeOrdersView from './components/ChangeOrdersView';
 import DocumentsView from './components/DocumentsView';
 import ScheduleView from './components/ScheduleView';
 import AdminView from './components/AdminView';
+import InviteAcceptView from './components/InviteAcceptView';
 import './App.css';
 
 const BASE_TABS = [
@@ -18,7 +19,25 @@ const BASE_TABS = [
   { id: 'docs', label: 'Documents' },
 ];
 
+// Returns the token from /invite/<token>, or null if we're not on an invite URL.
+// Done at module-init time so this is settled before any auth call fires.
+function getInviteTokenFromUrl() {
+  const m = window.location.pathname.match(/^\/invite\/([A-Za-z0-9]+)\/?$/);
+  return m ? m[1] : null;
+}
+
+// Top-level router. If the URL is /invite/<token>, show the standalone signup
+// view (no /api/me call — the invitee has no creds yet). Otherwise the main app.
+// Kept as a separate component so MainApp's hooks always run in the same order.
 export default function App() {
+  const inviteToken = getInviteTokenFromUrl();
+  if (inviteToken) {
+    return <InviteAcceptView token={inviteToken} />;
+  }
+  return <MainApp />;
+}
+
+function MainApp() {
   const [tab, setTab] = useState('projects');
   const [me, setMe] = useState(null);
 

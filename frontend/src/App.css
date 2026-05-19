@@ -995,3 +995,263 @@
   width: auto !important;
   margin: 0 !important;
 }
+
+/* ===== Admin sections (Pending invites + Active users) ===== */
+.admin-section {
+  margin-top: 24px;
+}
+.admin-section:first-of-type {
+  margin-top: 8px;
+}
+.admin-section-title {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+.admin-section-title .muted {
+  font-weight: 400;
+  font-size: 13px;
+}
+.admin-note-sm {
+  font-size: 12px;
+  padding: 6px 10px;
+  margin: 8px 0;
+}
+
+/* ===== Access-level badges (mirror permission presets) ===== */
+.badge-editor {
+  background: #dcfce7;
+  color: #166534;
+}
+.badge-viewer {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+.badge-custom {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+/* ===== Modal: wide variant for the permission picker ===== */
+.modal-wide {
+  max-width: 560px;
+  width: 90vw;
+}
+
+/* ===== Permissions picker ===== */
+.perms-picker-label {
+  display: block;
+  margin-top: 16px;
+  margin-bottom: 6px;
+  font-weight: 500;
+}
+.perms-picker {
+  border: 1px solid var(--border, #e5e7eb);
+  border-radius: 8px;
+  padding: 12px;
+  background: #fafafa;
+}
+.perms-preset-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.perms-preset-btn {
+  padding: 8px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  border: 1px solid #d1d5db;
+  background: white;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+.perms-preset-btn:hover:not(:disabled) {
+  border-color: #9ca3af;
+  background: #f9fafb;
+}
+.perms-preset-btn.active {
+  background: #1f2937;
+  border-color: #1f2937;
+  color: white;
+}
+.perms-preset-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+.perms-preset-desc {
+  font-size: 12px;
+  margin: 0 0 4px 2px;
+}
+
+/* The per-tab grid revealed under "Custom" */
+.perms-grid {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.perms-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 0;
+}
+.perms-row-label {
+  font-size: 13px;
+  font-weight: 500;
+}
+.perms-row-sub {
+  font-size: 11px;
+  font-weight: 400;
+  margin-top: 1px;
+}
+.perms-row-options {
+  display: inline-flex;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  overflow: hidden;
+  background: white;
+}
+.perms-seg-btn {
+  padding: 5px 11px;
+  font-size: 12px;
+  font-weight: 500;
+  border: none;
+  background: white;
+  cursor: pointer;
+  color: #6b7280;
+  border-right: 1px solid #d1d5db;
+  transition: all 0.12s ease;
+}
+.perms-seg-btn:last-child {
+  border-right: none;
+}
+.perms-seg-btn:hover:not(:disabled):not(.active) {
+  background: #f3f4f6;
+  color: #111827;
+}
+.perms-seg-btn.active {
+  background: #1f2937;
+  color: white;
+}
+.perms-seg-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* ===== Invite link presentation ===== */
+.invite-link-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.invite-link-row input {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  font-size: 12px;
+  background: #f9fafb;
+}
+.invite-link-note {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+/* ===== Invite signup page (full-screen, no app chrome) ===== */
+.invite-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f3f4f6;
+  padding: 40px 20px;
+}
+.invite-card {
+  background: white;
+  width: 100%;
+  max-width: 440px;
+  padding: 36px 36px 32px;
+  border-radius: 12px;
+  border: 1px solid #e5e7eb;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.04);
+}
+.invite-brand {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+  margin-bottom: 20px;
+}
+.invite-card h1 {
+  margin: 0 0 8px 0;
+  font-size: 24px;
+  font-weight: 600;
+  color: #111827;
+}
+.invite-card p {
+  margin: 0 0 12px 0;
+}
+.invite-card label {
+  display: block;
+  margin-top: 14px;
+  margin-bottom: 4px;
+  font-weight: 500;
+  font-size: 13px;
+  color: #374151;
+}
+.invite-card input[type="text"],
+.invite-card input[type="password"],
+.invite-card input[type="email"],
+.invite-card input:not([type]) {
+  width: 100%;
+  padding: 8px 12px;
+  font-size: 14px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  box-sizing: border-box;
+}
+.invite-card input:focus {
+  outline: 2px solid #1f2937;
+  outline-offset: -1px;
+  border-color: #1f2937;
+}
+.invite-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin: 14px 0 6px;
+}
+.invite-meta-label {
+  font-size: 12px;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+.invite-meta-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: #111827;
+}
+.invite-help-text {
+  font-size: 13px;
+  margin-top: 6px !important;
+}
+.invite-submit-btn {
+  margin-top: 20px;
+  width: 100%;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 500;
+}

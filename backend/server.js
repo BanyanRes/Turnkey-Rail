@@ -9,6 +9,7 @@ const morgan = require('morgan');
 const bcrypt = require('bcryptjs');
 
 const { initDb, getDb } = require('./db/database');
+const perms = require('./lib/permissions');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -64,12 +65,32 @@ function unauthorized(res) {
 }
 
 async function basicAuth(req, res, next) {
+  // Public bypass: invitation-acceptance routes have no auth — the user signing
+  // up doesn't have creds yet. Server.js controls this rather than the router
+  // because app.use(basicAuth) is global.
+  if (req.path.startsWith('/api/invitations/token/')) {
+    return next();
+  }
+
+  // Public bypass: anything that isn't an API call is the React SPA bundle
+  // (HTML, JS, CSS, /invite/<token> SPA route, etc). Static assets don't need
+  // auth — the API does. The browser will still get prompted on the first
+  // /api/me call, so the practical UX is unchanged for normal sign-in.
+  if (!req.path.startsWith('/api')) {
+    return next();
+  }
+
   const db = getDb();
   const dbHasUsers = db.prepare('SELECT 1 FROM users LIMIT 1').get();
 
   // Dev mode: no users anywhere -> bypass auth, pretend you're a dev admin.
   if (ENV_USERS.size === 0 && !dbHasUsers) {
-    req.user = { username: 'dev', is_admin: true, source: 'none' };
+    req.user = {
+      username: 'dev',
+      is_admin: true,
+      source: 'none',
+      permissions: perms.envUserPermissions(),
+    };
     return next();
   }
 
@@ -87,18 +108,30 @@ async function basicAuth(req, res, next) {
   const u = decoded.slice(0, idx);
   const p = decoded.slice(idx + 1);
 
-  // 1) Env-var users — always admin (root)
+  // 1) Env-var users — always admin (root), full permissions on everything
   if (ENV_USERS.get(u) === p) {
-    req.user = { username: u, is_admin: true, source: 'env' };
+    req.user = {
+      username: u,
+      is_admin: true,
+      source: 'env',
+      permissions: perms.envUserPermissions(),
+    };
     return next();
   }
 
-  // 2) DB users — bcrypt-compared
+  // 2) DB users — bcrypt-compared, permissions parsed from JSON column
   const dbUser = db.prepare('SELECT * FROM users WHERE username = ?').get(u);
   if (dbUser) {
     const ok = await bcrypt.compare(p, dbUser.password_hash);
     if (ok) {
-      req.user = { username: dbUser.username, is_admin: !!dbUser.is_admin, source: 'db', id: dbUser.id };
+      req.user = {
+        username: dbUser.username,
+        is_admin: !!dbUser.is_admin,
+        source: 'db',
+        id: dbUser.id,
+        email: dbUser.email || null,
+        permissions: perms.parse(dbUser.permissions),
+      };
       return next();
     }
   }
@@ -106,12 +139,8 @@ async function basicAuth(req, res, next) {
   return unauthorized(res);
 }
 
-function requireAdmin(req, res, next) {
-  if (!req.user || !req.user.is_admin) {
-    return res.status(403).json({ error: 'Admin only' });
-  }
-  next();
-}
+// Admin gate, now driven by permissions.admin === 'full' (set by basicAuth above).
+const requireAdmin = perms.requireAdmin;
 
 // ===== Middleware =====
 app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
@@ -140,6 +169,7 @@ app.use('/api/change-orders', require('./routes/changeOrders'));
 app.use('/api/documents', require('./routes/documents'));
 app.use('/api/tasks', require('./routes/tasks'));
 app.use('/api/users', requireAdmin, require('./routes/users'));
+app.use('/api/invitations', require('./routes/invitations'));
 
 // /api/* 404 — scoped so unmatched non-API routes can fall through to SPA fallback below
 app.use('/api', (req, res) => {

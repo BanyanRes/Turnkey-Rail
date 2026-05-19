@@ -140,4 +140,15 @@ export const api = {
     request(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteUser: (id) =>
     request(`/users/${id}`, { method: 'DELETE' }),
+
+  // Invitations (admin only, except the two /token/ endpoints which are public)
+  listInvitations: () => request('/invitations'),
+  createInvitation: (data) =>
+    request('/invitations', { method: 'POST', body: JSON.stringify(data) }),
+  deleteInvitation: (id) =>
+    request(`/invitations/${id}`, { method: 'DELETE' }),
+  // Public — used by the invite-accept page
+  getInvitationByToken: (token) => request(`/invitations/token/${token}`),
+  acceptInvitation: (token, data) =>
+    request(`/invitations/token/${token}/accept`, { method: 'POST', body: JSON.stringify(data) }),
 };

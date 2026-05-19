@@ -128,4 +128,16 @@ export const api = {
     request(`/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteTask: (id) =>
     request(`/tasks/${id}`, { method: 'DELETE' }),
+
+  // Current user
+  getMe: () => request('/me'),
+
+  // Users (admin only)
+  listUsers: () => request('/users'),
+  createUser: (data) =>
+    request('/users', { method: 'POST', body: JSON.stringify(data) }),
+  updateUser: (id, data) =>
+    request(`/users/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteUser: (id) =>
+    request(`/users/${id}`, { method: 'DELETE' }),
 };

@@ -150,3 +150,16 @@ CREATE TABLE IF NOT EXISTS schedule_tasks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tasks_project ON schedule_tasks(project_id);
+
+-- Application users (for admin UI; basic auth credentials beyond env vars)
+-- Env-var users (BASIC_AUTH_USERS) are always admin and not stored here.
+CREATE TABLE IF NOT EXISTS users (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  username      TEXT    NOT NULL UNIQUE,
+  password_hash TEXT    NOT NULL,            -- bcrypt
+  is_admin      INTEGER NOT NULL DEFAULT 0,  -- 0/1
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);

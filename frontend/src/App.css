@@ -901,3 +901,97 @@
   background: white;
   outline: none;
 }
+
+/* ===== Admin view ===== */
+.signed-in-as {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-left: auto;
+}
+
+.admin-view {
+  padding: 4px 0;
+}
+.admin-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.admin-header h2 {
+  margin: 0 0 4px 0;
+}
+.admin-header .muted {
+  margin: 0;
+  font-size: 13px;
+}
+.admin-note {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  color: #78350f;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+.admin-error {
+  background: #fee2e2;
+  border: 1px solid #fca5a5;
+  color: #991b1b;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  margin: 8px 0;
+}
+.empty-state {
+  padding: 32px;
+  text-align: center;
+  color: var(--text-muted, #6b7280);
+  background: #f9fafb;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+}
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: lowercase;
+  margin-left: 6px;
+  letter-spacing: 0.02em;
+}
+.badge-admin {
+  background: #ede9fe;
+  color: #5b21b6;
+}
+.badge-user {
+  background: #e5e7eb;
+  color: #374151;
+}
+.badge-self {
+  background: #dbeafe;
+  color: #1e40af;
+}
+.badge-source {
+  background: #f3f4f6;
+  color: #4b5563;
+  font-family: ui-monospace, SFMono-Regular, monospace;
+  text-transform: none;
+}
+
+.checkbox-row {
+  display: flex !important;
+  align-items: center;
+  gap: 6px;
+  font-weight: 400 !important;
+  margin-top: 8px;
+}
+.checkbox-row input[type="checkbox"] {
+  width: auto !important;
+  margin: 0 !important;
+}

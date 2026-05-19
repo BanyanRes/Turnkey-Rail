@@ -22,13 +22,38 @@ const HAS_DIST = fs.existsSync(DIST_DIR);
 initDb();
 
 // ===== Basic Auth (opt-in via env vars) =====
-// If BASIC_AUTH_USER + BASIC_AUTH_PASS are set, every request requires
-// HTTP Basic Auth. Browsers handle this with a native login prompt.
-// For local dev, leave the vars unset and auth is bypassed entirely.
+// Multi-user format: BASIC_AUTH_USERS="alice:pw1,bob:pw2,jyun:pw3"
+//   - users separated by ","
+//   - each pair split on FIRST ":" (so passwords MAY contain ":" but not ",")
+//   - usernames may not contain ":" or ","
+// Single-user legacy format: BASIC_AUTH_USER + BASIC_AUTH_PASS still works.
+// If no auth vars are set at all, the app is wide open (dev mode).
+function parseAuthUsers() {
+  const map = new Map();
+  if (process.env.BASIC_AUTH_USER && process.env.BASIC_AUTH_PASS) {
+    map.set(process.env.BASIC_AUTH_USER, process.env.BASIC_AUTH_PASS);
+  }
+  const multi = process.env.BASIC_AUTH_USERS;
+  if (multi) {
+    for (const pair of multi.split(',')) {
+      const trimmed = pair.trim();
+      if (!trimmed) continue;
+      const idx = trimmed.indexOf(':');
+      if (idx <= 0) continue; // skip malformed entries
+      const u = trimmed.slice(0, idx);
+      const p = trimmed.slice(idx + 1);
+      if (u && p) map.set(u, p);
+    }
+  }
+  return map;
+}
+const AUTH_USERS = parseAuthUsers();
+if (AUTH_USERS.size > 0) {
+  console.log(`[auth] Basic Auth enabled — ${AUTH_USERS.size} user(s) configured`);
+}
+
 function basicAuth(req, res, next) {
-  const user = process.env.BASIC_AUTH_USER;
-  const pass = process.env.BASIC_AUTH_PASS;
-  if (!user || !pass) return next();
+  if (AUTH_USERS.size === 0) return next();
 
   const header = req.headers.authorization || '';
   if (header.startsWith('Basic ')) {
@@ -36,7 +61,7 @@ function basicAuth(req, res, next) {
     const idx = decoded.indexOf(':');
     const u = decoded.slice(0, idx);
     const p = decoded.slice(idx + 1);
-    if (u === user && p === pass) return next();
+    if (AUTH_USERS.get(u) === p) return next();
   }
   res.set('WWW-Authenticate', 'Basic realm="Turnkey Rail", charset="UTF-8"');
   return res.status(401).send('Authentication required');

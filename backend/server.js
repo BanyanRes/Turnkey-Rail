@@ -160,14 +160,20 @@ app.get('/api/me', (req, res) => {
 });
 
 // ===== API routes =====
-app.use('/api/projects', require('./routes/projects'));
-app.use('/api/budget-lines', require('./routes/budgetLines'));
-app.use('/api/subcontractors', require('./routes/subcontractors'));
-app.use('/api/pay-apps', require('./routes/payApplications').router);
-app.use('/api/pay-app-lines', require('./routes/payAppLines'));
-app.use('/api/change-orders', require('./routes/changeOrders'));
-app.use('/api/documents', require('./routes/documents'));
-app.use('/api/tasks', require('./routes/tasks'));
+// Method-aware permission gate: GET requires 'read', writes require 'full'.
+const gate = (tab) => (req, res, next) => {
+  const level = req.method === 'GET' ? 'read' : 'full';
+  return perms.requirePermission(tab, level)(req, res, next);
+};
+
+app.use('/api/projects', gate('projects'), require('./routes/projects'));
+app.use('/api/budget-lines', gate('projects'), require('./routes/budgetLines'));
+app.use('/api/subcontractors', gate('vendors'), require('./routes/subcontractors'));
+app.use('/api/pay-apps', gate('payapps'), require('./routes/payApplications').router);
+app.use('/api/pay-app-lines', gate('payapps'), require('./routes/payAppLines'));
+app.use('/api/change-orders', gate('changeorders'), require('./routes/changeOrders'));
+app.use('/api/documents', gate('documents'), require('./routes/documents'));
+app.use('/api/tasks', gate('schedule'), require('./routes/tasks'));
 app.use('/api/users', requireAdmin, require('./routes/users'));
 app.use('/api/invitations', require('./routes/invitations'));
 

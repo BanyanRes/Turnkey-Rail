@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { fmtMoney, parseMoney } from '../utils';
+import { canEdit } from '../permissions';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -10,7 +11,8 @@ const STATUS_LABELS = {
   rejected: 'Rejected',
 };
 
-export default function PayAppsView() {
+export default function PayAppsView({ me }) {
+  const editable = canEdit(me, 'payapps');
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
@@ -21,6 +23,7 @@ export default function PayAppsView() {
       <PayAppDetail
         payAppId={selectedId}
         onBack={() => { setSelectedId(null); bumpRefresh(); }}
+        editable={editable}
       />
     );
   }
@@ -31,7 +34,7 @@ export default function PayAppsView() {
         <div className="filter-bar">
           <span className="muted">All pay applications across projects</span>
         </div>
-        <button className="btn-primary" onClick={() => setCreating(true)}>+ New Pay App</button>
+        {editable && <button className="btn-primary" onClick={() => setCreating(true)}>+ New Pay App</button>}
       </div>
       <PayAppsList
         onSelect={setSelectedId}
@@ -250,7 +253,7 @@ function NewPayAppForm({ onCreated, onCancel }) {
 // =====================================================
 // Detail (G703-style)
 // =====================================================
-function PayAppDetail({ payAppId, onBack }) {
+function PayAppDetail({ payAppId, onBack, editable = true }) {
   const [payApp, setPayApp] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -314,8 +317,12 @@ function PayAppDetail({ payAppId, onBack }) {
           <button className="btn-secondary btn-sm" onClick={onBack}>← Back to list</button>
         </div>
         <div className="filter-bar">
-          <StatusChanger current={payApp.status} onChange={changeStatus} />
-          <button className="btn-danger btn-sm" onClick={handleDelete}>Delete</button>
+          {editable ? (
+            <StatusChanger current={payApp.status} onChange={changeStatus} />
+          ) : (
+            <span className={`status status-${payApp.status}`}>{STATUS_LABELS[payApp.status] || payApp.status}</span>
+          )}
+          {editable && <button className="btn-danger btn-sm" onClick={handleDelete}>Delete</button>}
         </div>
       </div>
 
@@ -338,7 +345,7 @@ function PayAppDetail({ payAppId, onBack }) {
 
         <div className="section-header">
           <h3>Schedule of values (G703)</h3>
-          {!showNewLine && (
+          {editable && !showNewLine && (
             <button className="btn-secondary btn-sm" onClick={() => setShowNewLine(true)}>
               + Add line
             </button>

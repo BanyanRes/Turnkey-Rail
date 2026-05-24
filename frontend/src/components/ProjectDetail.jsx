@@ -1,7 +1,7 @@
 import { fmtMoney } from '../utils';
 import BudgetTable from './BudgetTable';
 
-export default function ProjectDetail({ project, onChange, onDelete }) {
+export default function ProjectDetail({ project, onChange, onDelete, editable = true }) {
   const hasCOs = Number(project.approved_co_total || 0) !== 0;
 
   return (
@@ -44,11 +44,11 @@ export default function ProjectDetail({ project, onChange, onDelete }) {
               {project.status.replace('_', ' ')}
             </div>
           </div>
-          <button className="btn-danger" onClick={onDelete}>Delete</button>
+          {editable && <button className="btn-danger" onClick={onDelete}>Delete</button>}
         </div>
       </div>
 
-      <BudgetTable projectId={project.id} onTotalsChange={onChange} />
+      <BudgetTable projectId={project.id} onTotalsChange={onChange} editable={editable} />
     </div>
   );
 }

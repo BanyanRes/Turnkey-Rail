@@ -75,12 +75,12 @@ function MainApp() {
       </header>
 
       <div className="app-body">
-        {tab === 'projects' && <ProjectsView />}
-        {tab === 'schedule' && <ScheduleView />}
-        {tab === 'vendors' && <VendorsView />}
-        {tab === 'payapps' && <PayAppsView />}
-        {tab === 'cos' && <ChangeOrdersView />}
-        {tab === 'docs' && <DocumentsView />}
+        {tab === 'projects' && <ProjectsView me={me} />}
+        {tab === 'schedule' && <ScheduleView me={me} />}
+        {tab === 'vendors' && <VendorsView me={me} />}
+        {tab === 'payapps' && <PayAppsView me={me} />}
+        {tab === 'cos' && <ChangeOrdersView me={me} />}
+        {tab === 'docs' && <DocumentsView me={me} />}
         {tab === 'admin' && me?.is_admin && <AdminView me={me} />}
       </div>
     </div>

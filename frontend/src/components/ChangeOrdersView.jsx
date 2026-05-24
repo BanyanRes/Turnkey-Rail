@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { fmtMoney, parseMoney } from '../utils';
+import { canEdit } from '../permissions';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -31,7 +32,8 @@ const EMPTY = {
   notes: '',
 };
 
-export default function ChangeOrdersView() {
+export default function ChangeOrdersView({ me }) {
+  const editable = canEdit(me, 'changeorders');
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -108,7 +110,7 @@ export default function ChangeOrdersView() {
             <option value="void">Void</option>
           </select>
         </div>
-        <button className="btn-primary" onClick={() => setEditing('new')}>+ New Change Order</button>
+        {editable && <button className="btn-primary" onClick={() => setEditing('new')}>+ New Change Order</button>}
       </div>
 
       <main className="vendors-main">
@@ -154,7 +156,7 @@ export default function ChangeOrdersView() {
             </thead>
             <tbody>
               {items.map((c) => (
-                <tr key={c.id} className="vendor-row" onClick={() => setEditing(c)}>
+                <tr key={c.id} className="vendor-row" onClick={() => editable && setEditing(c)} style={{ cursor: editable ? 'pointer' : 'default' }}>
                   <td className="strong">CO-{String(c.co_number).padStart(3, '0')}</td>
                   <td>
                     <span className="code">{c.project_code}</span>{' '}
@@ -180,7 +182,7 @@ export default function ChangeOrdersView() {
                   </td>
                   <td className="amount-cell muted">{c.days_added || 0}</td>
                   <td className="col-action" onClick={(e) => e.stopPropagation()}>
-                    <button className="btn-icon" title="Delete" onClick={() => handleDelete(c)}>×</button>
+                    {editable && <button className="btn-icon" title="Delete" onClick={() => handleDelete(c)}>×</button>}
                   </td>
                 </tr>
               ))}

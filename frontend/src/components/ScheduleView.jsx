@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { api } from '../api';
+import { canEdit } from '../permissions';
 
 // ============================================================
 // Date helpers
@@ -29,7 +30,8 @@ function fmtDateShort(iso) {
 // ============================================================
 // Main view
 // ============================================================
-export default function ScheduleView() {
+export default function ScheduleView({ me }) {
+  const editable = canEdit(me, 'schedule');
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState(null);
   const [tasks, setTasks] = useState([]);
@@ -97,7 +99,7 @@ export default function ScheduleView() {
             ))}
           </select>
         </div>
-        {project && (
+        {editable && project && (
           <button className="btn-primary" onClick={() => setShowNew(true)}>+ New Task</button>
         )}
       </div>
@@ -109,7 +111,7 @@ export default function ScheduleView() {
           <div className="empty-state">Select a project to view its schedule.</div>
         ) : tasks.length === 0 ? (
           <div className="empty-state">
-            No tasks yet for {project.code}. Click "+ New Task" to start.
+            No tasks yet for {project.code}.{editable ? ' Click "+ New Task" to start.' : ''}
           </div>
         ) : (
           <>
@@ -119,6 +121,7 @@ export default function ScheduleView() {
               subs={subs}
               onSave={handleSaveTask}
               onDelete={handleDeleteTask}
+              editable={editable}
             />
           </>
         )}
@@ -268,7 +271,7 @@ function GanttBar({ task, rangeStart, totalDays }) {
 // ============================================================
 // Task table (with inline editing for dates + progress)
 // ============================================================
-function TaskTable({ tasks, subs, onSave, onDelete }) {
+function TaskTable({ tasks, subs, onSave, onDelete, editable = true }) {
   return (
     <div className="task-table-wrap">
       <div className="section-header">
@@ -282,7 +285,7 @@ function TaskTable({ tasks, subs, onSave, onDelete }) {
             <th>Start</th>
             <th>End</th>
             <th className="amount-th">Progress</th>
-            <th></th>
+            {editable && <th></th>}
           </tr>
         </thead>
         <tbody>
@@ -295,6 +298,7 @@ function TaskTable({ tasks, subs, onSave, onDelete }) {
                   type="date"
                   className="cell-date"
                   defaultValue={t.start_date || ''}
+                  disabled={!editable}
                   onBlur={(e) => {
                     const v = e.target.value || null;
                     if (v !== (t.start_date || null)) onSave(t.id, { start_date: v });
@@ -306,6 +310,7 @@ function TaskTable({ tasks, subs, onSave, onDelete }) {
                   type="date"
                   className="cell-date"
                   defaultValue={t.end_date || ''}
+                  disabled={!editable}
                   onBlur={(e) => {
                     const v = e.target.value || null;
                     if (v !== (t.end_date || null)) onSave(t.id, { end_date: v });
@@ -313,11 +318,17 @@ function TaskTable({ tasks, subs, onSave, onDelete }) {
                 />
               </td>
               <td className="amount-cell">
-                <ProgressEdit value={t.progress} onSave={(v) => onSave(t.id, { progress: v })} />
+                {editable ? (
+                  <ProgressEdit value={t.progress} onSave={(v) => onSave(t.id, { progress: v })} />
+                ) : (
+                  <span>{t.progress || 0}%</span>
+                )}
               </td>
-              <td className="col-action">
-                <button className="btn-icon" title="Delete" onClick={() => onDelete(t)}>×</button>
-              </td>
+              {editable && (
+                <td className="col-action">
+                  <button className="btn-icon" title="Delete" onClick={() => onDelete(t)}>×</button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>

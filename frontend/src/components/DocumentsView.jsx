@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { api } from '../api';
+import { canEdit } from '../permissions';
 
 const CATEGORIES = ['plans', 'contract', 'permit', 'photo', 'invoice', 'insurance', 'other'];
 
@@ -17,7 +18,8 @@ function fmtDate(iso) {
   return iso.slice(0, 10);
 }
 
-export default function DocumentsView() {
+export default function DocumentsView({ me }) {
+  const editable = canEdit(me, 'documents');
   const [docs, setDocs] = useState([]);
   const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -130,14 +132,15 @@ export default function DocumentsView() {
             {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
           </select>
         </div>
-        <UploadButton onUpload={handleFiles} uploading={uploading} />
+        {editable && <UploadButton onUpload={handleFiles} uploading={uploading} />}
       </div>
 
       <main
         className="vendors-main"
-        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragOver={(e) => { if (editable) { e.preventDefault(); setDragOver(true); } }}
         onDragLeave={() => setDragOver(false)}
         onDrop={(e) => {
+          if (!editable) return;
           e.preventDefault();
           setDragOver(false);
           handleFiles(e.dataTransfer.files);
@@ -186,6 +189,7 @@ export default function DocumentsView() {
                       className="inline-select"
                       value={d.project_id || ''}
                       onChange={(e) => handleProjectChange(d, e.target.value)}
+                      disabled={!editable}
                     >
                       <option value="">— Unassigned —</option>
                       {projects.map((p) => (
@@ -198,6 +202,7 @@ export default function DocumentsView() {
                       className="inline-select"
                       value={d.category || ''}
                       onChange={(e) => handleCategoryChange(d, e.target.value)}
+                      disabled={!editable}
                     >
                       <option value="">—</option>
                       {CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -213,7 +218,7 @@ export default function DocumentsView() {
                       title="Download"
                       style={{ display: 'inline-block', textDecoration: 'none' }}
                     >↓</a>
-                    <button className="btn-icon" title="Delete" onClick={() => handleDelete(d)}>×</button>
+                    {editable && <button className="btn-icon" title="Delete" onClick={() => handleDelete(d)}>×</button>}
                   </td>
                 </tr>
               ))}

@@ -90,3 +90,16 @@ export function summarizePerms(perms) {
   if (tabsWithAccess === 0) return 'Custom · no tab access';
   return `Custom · ${tabsWithAccess} tab${tabsWithAccess === 1 ? '' : 's'}`;
 }
+
+// UI helpers — call from view components to decide whether to show
+// create/edit/delete buttons.
+export function canEdit(me, tab) {
+  if (!me) return false;
+  return me.permissions?.[tab] === 'full';
+}
+
+export function canView(me, tab) {
+  if (!me) return false;
+  const level = me.permissions?.[tab];
+  return level === 'full' || level === 'read';
+}

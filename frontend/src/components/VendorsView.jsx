@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
+import { canEdit } from '../permissions';
 
 const EMPTY = {
   name: '', trade: '', contact_name: '', email: '', phone: '',
@@ -7,7 +8,8 @@ const EMPTY = {
   insurance_expiry: '', status: 'active', notes: '',
 };
 
-export default function VendorsView() {
+export default function VendorsView({ me }) {
+  const editable = canEdit(me, 'vendors');
   const [subs, setSubs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -74,7 +76,7 @@ export default function VendorsView() {
             <option value="inactive">Inactive</option>
           </select>
         </div>
-        <button className="btn-primary" onClick={() => setEditing('new')}>+ New Vendor</button>
+        <button className="btn-primary" onClick={() => setEditing('new')} disabled={!editable} style={{ visibility: editable ? 'visible' : 'hidden' }}>+ New Vendor</button>
       </div>
 
       <main className="vendors-main">
@@ -103,7 +105,7 @@ export default function VendorsView() {
             </thead>
             <tbody>
               {subs.map((s) => (
-                <tr key={s.id} onClick={() => setEditing(s)} className="vendor-row">
+                <tr key={s.id} onClick={() => editable && setEditing(s)} className="vendor-row" style={{ cursor: editable ? 'pointer' : 'default' }}>
                   <td className="strong">{s.name}</td>
                   <td className="muted">{s.trade || '—'}</td>
                   <td>{s.contact_name || '—'}</td>
@@ -118,11 +120,13 @@ export default function VendorsView() {
                     </span>
                   </td>
                   <td className="col-action" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      className="btn-icon"
-                      title="Delete vendor"
-                      onClick={() => handleDelete(s)}
-                    >×</button>
+                    {editable && (
+                      <button
+                        className="btn-icon"
+                        title="Delete vendor"
+                        onClick={() => handleDelete(s)}
+                      >×</button>
+                    )}
                   </td>
                 </tr>
               ))}

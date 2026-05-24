@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { api } from '../api';
 import { fmtMoney, parseMoney } from '../utils';
 
-export default function BudgetTable({ projectId, onTotalsChange }) {
+export default function BudgetTable({ projectId, onTotalsChange, editable = true }) {
   const [lines, setLines] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showNew, setShowNew] = useState(false);
@@ -60,7 +60,7 @@ export default function BudgetTable({ projectId, onTotalsChange }) {
     <section className="budget-section">
       <div className="section-header">
         <h3>Budget</h3>
-        {!showNew && (
+        {editable && !showNew && (
           <button className="btn-secondary btn-sm" onClick={() => setShowNew(true)}>
             + Add line
           </button>
@@ -79,13 +79,13 @@ export default function BudgetTable({ projectId, onTotalsChange }) {
               <th className="col-cat">Category</th>
               <th>Description</th>
               <th className="col-amount">Budgeted</th>
-              <th className="col-action"></th>
+              {editable && <th className="col-action"></th>}
             </tr>
           </thead>
           <tbody>
             {lines.length === 0 && (
               <tr>
-                <td colSpan="5" className="muted center pad">
+                <td colSpan={editable ? 5 : 4} className="muted center pad">
                   No budget lines yet.
                 </td>
               </tr>
@@ -96,20 +96,26 @@ export default function BudgetTable({ projectId, onTotalsChange }) {
                 <td className="col-cat muted">{l.category || '—'}</td>
                 <td>{l.description}</td>
                 <td className="col-amount">
-                  <InlineAmount
-                    value={l.budgeted_amount}
-                    onSave={(v) => updateLine(l.id, { budgeted_amount: v })}
-                  />
+                  {editable ? (
+                    <InlineAmount
+                      value={l.budgeted_amount}
+                      onSave={(v) => updateLine(l.id, { budgeted_amount: v })}
+                    />
+                  ) : (
+                    fmtMoney(l.budgeted_amount)
+                  )}
                 </td>
-                <td className="col-action">
-                  <button
-                    className="btn-icon"
-                    onClick={() => deleteLine(l.id)}
-                    title="Delete line"
-                  >
-                    ×
-                  </button>
-                </td>
+                {editable && (
+                  <td className="col-action">
+                    <button
+                      className="btn-icon"
+                      onClick={() => deleteLine(l.id)}
+                      title="Delete line"
+                    >
+                      ×
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -117,13 +123,13 @@ export default function BudgetTable({ projectId, onTotalsChange }) {
             <tr>
               <td colSpan="3" className="strong">Total</td>
               <td className="col-amount strong">{fmtMoney(total)}</td>
-              <td></td>
+              {editable && <td></td>}
             </tr>
           </tfoot>
         </table>
       )}
 
-      {showNew && (
+      {editable && showNew && (
         <NewBudgetLineForm onCreate={addLine} onCancel={() => setShowNew(false)} />
       )}
     </section>

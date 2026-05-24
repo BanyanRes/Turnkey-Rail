@@ -3,8 +3,10 @@ import { api } from '../api';
 import ProjectList from './ProjectList';
 import ProjectDetail from './ProjectDetail';
 import NewProjectForm from './NewProjectForm';
+import { canEdit } from '../permissions';
 
-export default function ProjectsView() {
+export default function ProjectsView({ me }) {
+  const editable = canEdit(me, 'projects');
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
@@ -45,9 +47,11 @@ export default function ProjectsView() {
 
   return (
     <>
-      <div className="view-toolbar">
-        <button className="btn-primary" onClick={() => setCreating(true)}>+ New Project</button>
-      </div>
+      {editable && (
+        <div className="view-toolbar">
+          <button className="btn-primary" onClick={() => setCreating(true)}>+ New Project</button>
+        </div>
+      )}
 
       <div className="split-body">
         <aside className="sidebar">
@@ -66,10 +70,11 @@ export default function ProjectsView() {
               project={selectedProject}
               onChange={refresh}
               onDelete={handleDelete}
+              editable={editable}
             />
           ) : (
             <div className="empty">
-              {loading ? 'Loading…' : 'Select a project, or create a new one.'}
+              {loading ? 'Loading…' : editable ? 'Select a project, or create a new one.' : 'Select a project to view.'}
             </div>
           )}
         </main>

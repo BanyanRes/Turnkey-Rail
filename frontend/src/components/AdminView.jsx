@@ -52,14 +52,6 @@ export default function AdminView({ me }) {
         </button>
       </div>
 
-      {meIsEnv && (
-        <div className="admin-note">
-          You're signed in as a <strong>root (env-var) user</strong>. Root users are managed
-          in Railway → Variables → <code>BASIC_AUTH_USERS</code> and never appear in this
-          table. The list below is only DB-managed users.
-        </div>
-      )}
-
       {error && <div className="admin-error">{error}</div>}
 
       {loading ? (

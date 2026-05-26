@@ -1,10 +1,12 @@
 // Lien waivers CRUD
 //
-// Tracks conditional/unconditional progress and final waivers in BOTH directions:
+// Tracks conditional/unconditional PROGRESS waivers in BOTH directions:
 //   inbound  — subs → us (GC)
 //   outbound — us → owner
 //
-// CA Civil Code §8132–8138 style.
+// CA Civil Code §8132–8138 style. Final waivers are intentionally omitted —
+// in residential GC practice the last pay app is handled the same as any
+// other progress cycle, with retainage release tracked separately.
 const express = require('express');
 const { getDb } = require('../db/database');
 
@@ -14,8 +16,6 @@ const VALID_DIRECTIONS = ['inbound', 'outbound'];
 const VALID_TYPES = [
   'conditional_progress',
   'unconditional_progress',
-  'conditional_final',
-  'unconditional_final',
 ];
 
 const FIELDS = [
@@ -78,12 +78,12 @@ router.get('/', (req, res) => {
 // GET /api/lien-waivers/warnings
 //
 // Returns lien-waiver obligations that are due but not yet on file. Used by
-// the UI to surface a banner on the Pay Apps and Liens tabs.
+// the UI to surface a banner on the Liens tab.
 //
 // Currently checked: PAID pay apps (sub side) missing the corresponding
-// unconditional_progress waiver, and APPROVED final pay apps missing
-// unconditional_final. Conditional waivers are not warned about because
-// they're typically delivered with the pay app and not blocking on payment.
+// unconditional_progress waiver. Conditional waivers are not warned about
+// because they're typically delivered with the pay app and not blocking on
+// payment.
 router.get('/warnings', (req, res) => {
   const db = getDb();
 
@@ -115,45 +115,9 @@ router.get('/warnings', (req, res) => {
     ORDER BY pa.project_id, pa.app_number
   `).all();
 
-  // Pay apps that have been paid but lack the matching unconditional_final
-  // waiver (only relevant if a conditional_final was issued — i.e. it WAS
-  // a final pay app cycle). We detect "this was a final cycle" by checking
-  // for a conditional_final on that pay app.
-  const missingUncondFinal = db.prepare(`
-    SELECT
-      pa.id            AS pay_app_id,
-      pa.app_number    AS pay_app_number,
-      pa.status        AS pay_app_status,
-      pa.project_id,
-      p.code           AS project_code,
-      p.name           AS project_name,
-      pa.subcontractor_id,
-      s.name           AS subcontractor_name,
-      s.trade          AS subcontractor_trade
-    FROM pay_applications pa
-    JOIN projects p ON p.id = pa.project_id
-    JOIN subcontractors s ON s.id = pa.subcontractor_id
-    WHERE pa.status = 'paid'
-      AND pa.subcontractor_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1 FROM lien_waivers lw
-        WHERE lw.pay_app_id = pa.id
-          AND lw.direction = 'inbound'
-          AND lw.waiver_type = 'conditional_final'
-      )
-      AND NOT EXISTS (
-        SELECT 1 FROM lien_waivers lw
-        WHERE lw.pay_app_id = pa.id
-          AND lw.direction = 'inbound'
-          AND lw.waiver_type = 'unconditional_final'
-      )
-    ORDER BY pa.project_id, pa.app_number
-  `).all();
-
   res.json({
     missing_unconditional_progress: missingUncondProgress,
-    missing_unconditional_final: missingUncondFinal,
-    total: missingUncondProgress.length + missingUncondFinal.length,
+    total: missingUncondProgress.length,
   });
 });
 

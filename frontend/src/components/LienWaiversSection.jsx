@@ -17,8 +17,6 @@ import { fmtMoney, parseMoney } from '../utils';
 const WAIVER_TYPES = [
   { id: 'conditional_progress',   label: 'Conditional · Progress' },
   { id: 'unconditional_progress', label: 'Unconditional · Progress' },
-  { id: 'conditional_final',      label: 'Conditional · Final' },
-  { id: 'unconditional_final',    label: 'Unconditional · Final' },
 ];
 
 const TYPE_LABEL = Object.fromEntries(WAIVER_TYPES.map(t => [t.id, t.label]));

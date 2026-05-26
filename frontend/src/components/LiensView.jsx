@@ -15,8 +15,6 @@ import { canEdit } from '../permissions';
 const WAIVER_TYPES = [
   { id: 'conditional_progress',   label: 'Conditional · Progress' },
   { id: 'unconditional_progress', label: 'Unconditional · Progress' },
-  { id: 'conditional_final',      label: 'Conditional · Final' },
-  { id: 'unconditional_final',    label: 'Unconditional · Final' },
 ];
 const TYPE_LABEL = Object.fromEntries(WAIVER_TYPES.map(t => [t.id, t.label]));
 
@@ -408,11 +406,10 @@ function NewOutboundForm({ projects, defaultProjectId, onCreated, onCancel }) {
   );
 }
 
-// Warning banner — surfaces missing unconditional waivers on paid pay apps.
+// Warning banner — surfaces missing unconditional progress waivers on paid pay apps.
 // Limits visible items to keep the banner compact; full list lives below.
 function WarningBanner({ warnings }) {
   const progress = warnings.missing_unconditional_progress || [];
-  const final = warnings.missing_unconditional_final || [];
   const SHOW_LIMIT = 5;
 
   return (
@@ -438,28 +435,6 @@ function WarningBanner({ warnings }) {
             ))}
             {progress.length > SHOW_LIMIT && (
               <li className="muted">…and {progress.length - SHOW_LIMIT} more</li>
-            )}
-          </ul>
-        </div>
-      )}
-
-      {final.length > 0 && (
-        <div className="lien-warning-section">
-          <div className="lien-warning-subtitle">
-            Missing <strong>unconditional final</strong> waiver
-            {final.length === 1 ? '' : 's'} ({final.length}):
-          </div>
-          <ul>
-            {final.slice(0, SHOW_LIMIT).map((r) => (
-              <li key={r.pay_app_id}>
-                <span className="code">{r.project_code}</span>{' '}
-                — Pay App #{r.pay_app_number} for{' '}
-                <strong>{r.subcontractor_name}</strong>{' '}
-                <span className="muted">(final paid, no uncond. final on file)</span>
-              </li>
-            ))}
-            {final.length > SHOW_LIMIT && (
-              <li className="muted">…and {final.length - SHOW_LIMIT} more</li>
             )}
           </ul>
         </div>

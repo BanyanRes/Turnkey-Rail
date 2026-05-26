@@ -134,6 +134,7 @@ export const api = {
     request(`/lien-waivers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deleteLienWaiver: (id) =>
     request(`/lien-waivers/${id}`, { method: 'DELETE' }),
+  getLienWaiverWarnings: () => request('/lien-waivers/warnings'),
 
   // Schedule tasks
   listTasks: (projectId) => request(`/tasks?project_id=${projectId}`),

@@ -75,6 +75,88 @@ router.get('/', (req, res) => {
   res.json(rows);
 });
 
+// GET /api/lien-waivers/warnings
+//
+// Returns lien-waiver obligations that are due but not yet on file. Used by
+// the UI to surface a banner on the Pay Apps and Liens tabs.
+//
+// Currently checked: PAID pay apps (sub side) missing the corresponding
+// unconditional_progress waiver, and APPROVED final pay apps missing
+// unconditional_final. Conditional waivers are not warned about because
+// they're typically delivered with the pay app and not blocking on payment.
+router.get('/warnings', (req, res) => {
+  const db = getDb();
+
+  // Pay apps that have been paid but lack the matching unconditional_progress
+  // waiver from that sub for that pay app. Only sub-side pay apps qualify —
+  // owner-side (no subcontractor) doesn't generate inbound waivers.
+  const missingUncondProgress = db.prepare(`
+    SELECT
+      pa.id            AS pay_app_id,
+      pa.app_number    AS pay_app_number,
+      pa.status        AS pay_app_status,
+      pa.project_id,
+      p.code           AS project_code,
+      p.name           AS project_name,
+      pa.subcontractor_id,
+      s.name           AS subcontractor_name,
+      s.trade          AS subcontractor_trade
+    FROM pay_applications pa
+    JOIN projects p ON p.id = pa.project_id
+    JOIN subcontractors s ON s.id = pa.subcontractor_id
+    WHERE pa.status = 'paid'
+      AND pa.subcontractor_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM lien_waivers lw
+        WHERE lw.pay_app_id = pa.id
+          AND lw.direction = 'inbound'
+          AND lw.waiver_type = 'unconditional_progress'
+      )
+    ORDER BY pa.project_id, pa.app_number
+  `).all();
+
+  // Pay apps that have been paid but lack the matching unconditional_final
+  // waiver (only relevant if a conditional_final was issued — i.e. it WAS
+  // a final pay app cycle). We detect "this was a final cycle" by checking
+  // for a conditional_final on that pay app.
+  const missingUncondFinal = db.prepare(`
+    SELECT
+      pa.id            AS pay_app_id,
+      pa.app_number    AS pay_app_number,
+      pa.status        AS pay_app_status,
+      pa.project_id,
+      p.code           AS project_code,
+      p.name           AS project_name,
+      pa.subcontractor_id,
+      s.name           AS subcontractor_name,
+      s.trade          AS subcontractor_trade
+    FROM pay_applications pa
+    JOIN projects p ON p.id = pa.project_id
+    JOIN subcontractors s ON s.id = pa.subcontractor_id
+    WHERE pa.status = 'paid'
+      AND pa.subcontractor_id IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM lien_waivers lw
+        WHERE lw.pay_app_id = pa.id
+          AND lw.direction = 'inbound'
+          AND lw.waiver_type = 'conditional_final'
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM lien_waivers lw
+        WHERE lw.pay_app_id = pa.id
+          AND lw.direction = 'inbound'
+          AND lw.waiver_type = 'unconditional_final'
+      )
+    ORDER BY pa.project_id, pa.app_number
+  `).all();
+
+  res.json({
+    missing_unconditional_progress: missingUncondProgress,
+    missing_unconditional_final: missingUncondFinal,
+    total: missingUncondProgress.length + missingUncondFinal.length,
+  });
+});
+
 // GET /api/lien-waivers/:id
 router.get('/:id', (req, res) => {
   const db = getDb();

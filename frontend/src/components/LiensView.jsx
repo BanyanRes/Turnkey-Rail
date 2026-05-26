@@ -29,11 +29,21 @@ export default function LiensView({ me }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [warnings, setWarnings] = useState(null);
 
   useEffect(() => {
     api.listProjects()
       .then(setProjects)
       .catch((e) => setError(e.message));
+  }, []);
+
+  // Warnings only depend on payment state, not the filters, so fetch once
+  // per refresh cycle alongside the list.
+  const loadWarnings = useCallback(async () => {
+    try {
+      const w = await api.getLienWaiverWarnings();
+      setWarnings(w);
+    } catch { /* don't block the page on warning fetch */ }
   }, []);
 
   const refresh = useCallback(async () => {
@@ -52,6 +62,7 @@ export default function LiensView({ me }) {
   }, [direction, projectId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => { loadWarnings(); }, [loadWarnings, waivers]);
 
   async function handleDelete(w) {
     if (!confirm(`Delete this ${TYPE_LABEL[w.waiver_type] || w.waiver_type} waiver?`)) return;
@@ -65,6 +76,10 @@ export default function LiensView({ me }) {
 
   return (
     <>
+      {warnings && warnings.total > 0 && (
+        <WarningBanner warnings={warnings} />
+      )}
+
       <div className="view-toolbar">
         <div className="filter-bar">
           <DirectionToggle value={direction} onChange={setDirection} />
@@ -389,6 +404,66 @@ function NewOutboundForm({ projects, defaultProjectId, onCreated, onCancel }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// Warning banner — surfaces missing unconditional waivers on paid pay apps.
+// Limits visible items to keep the banner compact; full list lives below.
+function WarningBanner({ warnings }) {
+  const progress = warnings.missing_unconditional_progress || [];
+  const final = warnings.missing_unconditional_final || [];
+  const SHOW_LIMIT = 5;
+
+  return (
+    <div className="lien-warning-banner">
+      <div className="lien-warning-title">
+        ⚠ {warnings.total} lien waiver{warnings.total === 1 ? '' : 's'} pending
+      </div>
+
+      {progress.length > 0 && (
+        <div className="lien-warning-section">
+          <div className="lien-warning-subtitle">
+            Missing <strong>unconditional progress</strong> waiver
+            {progress.length === 1 ? '' : 's'} ({progress.length}):
+          </div>
+          <ul>
+            {progress.slice(0, SHOW_LIMIT).map((r) => (
+              <li key={r.pay_app_id}>
+                <span className="code">{r.project_code}</span>{' '}
+                — Pay App #{r.pay_app_number} for{' '}
+                <strong>{r.subcontractor_name}</strong>{' '}
+                <span className="muted">(paid, no uncond. progress on file)</span>
+              </li>
+            ))}
+            {progress.length > SHOW_LIMIT && (
+              <li className="muted">…and {progress.length - SHOW_LIMIT} more</li>
+            )}
+          </ul>
+        </div>
+      )}
+
+      {final.length > 0 && (
+        <div className="lien-warning-section">
+          <div className="lien-warning-subtitle">
+            Missing <strong>unconditional final</strong> waiver
+            {final.length === 1 ? '' : 's'} ({final.length}):
+          </div>
+          <ul>
+            {final.slice(0, SHOW_LIMIT).map((r) => (
+              <li key={r.pay_app_id}>
+                <span className="code">{r.project_code}</span>{' '}
+                — Pay App #{r.pay_app_number} for{' '}
+                <strong>{r.subcontractor_name}</strong>{' '}
+                <span className="muted">(final paid, no uncond. final on file)</span>
+              </li>
+            ))}
+            {final.length > SHOW_LIMIT && (
+              <li className="muted">…and {final.length - SHOW_LIMIT} more</li>
+            )}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }

@@ -16,7 +16,10 @@ export default function PayAppsView({ me }) {
   const editable = canEdit(me, 'payapps');
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [autoCreating, setAutoCreating] = useState(false);
   const [refreshTick, setRefreshTick] = useState(0);
+  // 'all' | 'owner' | 'sub' — controls which pay apps the list shows.
+  const [scope, setScope] = useState('all');
   const bumpRefresh = () => setRefreshTick((t) => t + 1);
 
   if (selectedId) {
@@ -33,18 +36,52 @@ export default function PayAppsView({ me }) {
     <>
       <div className="view-toolbar">
         <div className="filter-bar">
-          <span className="muted">All pay applications across projects</span>
+          <div className="seg-toggle">
+            <button
+              type="button"
+              className={scope === 'all' ? 'seg-active' : ''}
+              onClick={() => setScope('all')}
+            >All</button>
+            <button
+              type="button"
+              className={scope === 'owner' ? 'seg-active' : ''}
+              onClick={() => setScope('owner')}
+            >Owner billings</button>
+            <button
+              type="button"
+              className={scope === 'sub' ? 'seg-active' : ''}
+              onClick={() => setScope('sub')}
+            >Sub pay apps</button>
+          </div>
         </div>
-        {editable && <button className="btn-primary" onClick={() => setCreating(true)}>+ New Pay App</button>}
+        {editable && (
+          <div className="filter-bar">
+            <button
+              className="btn-secondary"
+              onClick={() => setAutoCreating(true)}
+              title="Roll forward the prior pay app for a project (Owner or Sub)"
+            >
+              ⟳ Start next cycle
+            </button>
+            <button className="btn-primary" onClick={() => setCreating(true)}>+ New Pay App</button>
+          </div>
+        )}
       </div>
       <PayAppsList
         onSelect={setSelectedId}
         refreshTick={refreshTick}
+        scope={scope}
       />
       {creating && (
         <NewPayAppForm
           onCreated={(id) => { setCreating(false); setSelectedId(id); }}
           onCancel={() => setCreating(false)}
+        />
+      )}
+      {autoCreating && (
+        <AutoCreateForm
+          onCreated={(id) => { setAutoCreating(false); setSelectedId(id); }}
+          onCancel={() => setAutoCreating(false)}
         />
       )}
     </>
@@ -54,7 +91,7 @@ export default function PayAppsView({ me }) {
 // =====================================================
 // List
 // =====================================================
-function PayAppsList({ onSelect, refreshTick }) {
+function PayAppsList({ onSelect, refreshTick, scope = 'all' }) {
   const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -67,14 +104,25 @@ function PayAppsList({ onSelect, refreshTick }) {
       .finally(() => setLoading(false));
   }, [refreshTick]);
 
+  // Filter client-side. Owner = no subcontractor; Sub = has subcontractor.
+  const filtered = items.filter((p) => {
+    if (scope === 'owner') return p.subcontractor_id == null;
+    if (scope === 'sub') return p.subcontractor_id != null;
+    return true;
+  });
+
   return (
     <main className="vendors-main">
       {error && <div className="error">{error}</div>}
       {loading ? (
         <div className="muted">Loading…</div>
-      ) : items.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="empty-state">
-          No pay applications yet. Click "+ New Pay App" to create one.
+          {scope === 'owner'
+            ? 'No Owner billings yet. Click "⟳ Start next cycle" to create the first one for a project.'
+            : scope === 'sub'
+            ? 'No Sub pay applications yet.'
+            : 'No pay applications yet. Click "+ New Pay App" to create one.'}
         </div>
       ) : (
         <table className="vendors-table">
@@ -82,7 +130,7 @@ function PayAppsList({ onSelect, refreshTick }) {
             <tr>
               <th style={{ width: 60 }}>#</th>
               <th>Project</th>
-              <th>Vendor</th>
+              <th>Billing to</th>
               <th>Period</th>
               <th>Status</th>
               <th className="amount-th">Completed</th>
@@ -90,14 +138,20 @@ function PayAppsList({ onSelect, refreshTick }) {
             </tr>
           </thead>
           <tbody>
-            {items.map((p) => (
+            {filtered.map((p) => (
               <tr key={p.id} className="vendor-row" onClick={() => onSelect(p.id)}>
                 <td className="strong">#{p.app_number}</td>
                 <td>
                   <span className="code">{p.project_code}</span>{' '}
                   <span className="muted">— {p.project_name}</span>
                 </td>
-                <td>{p.subcontractor_name || <span className="muted">—</span>}</td>
+                <td>
+                  {p.subcontractor_name ? (
+                    <>{p.subcontractor_name}{p.subcontractor_trade ? <span className="muted"> · {p.subcontractor_trade}</span> : null}</>
+                  ) : (
+                    <span className="badge-owner">Owner billing</span>
+                  )}
+                </td>
                 <td className="muted">
                   {p.period_start && p.period_end
                     ? `${p.period_start} → ${p.period_end}`
@@ -116,6 +170,115 @@ function PayAppsList({ onSelect, refreshTick }) {
         </table>
       )}
     </main>
+  );
+}
+
+// =====================================================
+// Auto-create form (modal) — the big monthly time-saver.
+// Pick a project + Owner-or-Sub side; server rolls the prior cycle forward
+// (carries SoV lines, rolls "Total" into next "Prior", clears "This period"),
+// or seeds from project budget if nothing exists yet.
+// =====================================================
+function AutoCreateForm({ onCreated, onCancel }) {
+  const [projects, setProjects] = useState([]);
+  const [subs, setSubs] = useState([]);
+  const [side, setSide] = useState('owner'); // 'owner' | 'sub'
+  const [projectId, setProjectId] = useState('');
+  const [subId, setSubId] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    Promise.all([api.listProjects(), api.listSubs({ status: 'active' })])
+      .then(([ps, ss]) => { setProjects(ps); setSubs(ss); })
+      .catch((e) => setError(e.message));
+  }, []);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!projectId) { setError('Project is required'); return; }
+    if (side === 'sub' && !subId) { setError('Subcontractor is required'); return; }
+    setBusy(true);
+    setError(null);
+    try {
+      const created = await api.autoCreatePayApp({
+        project_id: Number(projectId),
+        subcontractor_id: side === 'sub' ? Number(subId) : null,
+      });
+      onCreated(created.id);
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>Start next pay-app cycle</h2>
+        <div className="muted" style={{ marginTop: -8, marginBottom: 12, fontSize: 13 }}>
+          Rolls the most recent pay app forward: copies the Schedule of Values,
+          rolls each line's <strong>Total</strong> into next month's <strong>Prior</strong>,
+          and clears the <strong>This period</strong> column for you to fill in.
+          If no prior pay app exists, seeds the Schedule of Values from the project budget.
+        </div>
+
+        <label>
+          Side
+          <div className="seg-toggle" style={{ marginTop: 4 }}>
+            <button
+              type="button"
+              className={side === 'owner' ? 'seg-active' : ''}
+              onClick={() => setSide('owner')}
+            >Owner billing</button>
+            <button
+              type="button"
+              className={side === 'sub' ? 'seg-active' : ''}
+              onClick={() => setSide('sub')}
+            >Sub pay app</button>
+          </div>
+        </label>
+
+        <label>
+          Project *
+          <select
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            autoFocus
+          >
+            <option value="">— Select a project —</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.code} — {p.name}</option>
+            ))}
+          </select>
+        </label>
+
+        {side === 'sub' && (
+          <label>
+            Subcontractor *
+            <select value={subId} onChange={(e) => setSubId(e.target.value)}>
+              <option value="">— Select a sub —</option>
+              {subs.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}{s.trade ? ` (${s.trade})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        {error && <div className="error">{error}</div>}
+
+        <div className="modal-actions">
+          <button type="button" onClick={onCancel} className="btn-secondary" disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={busy}>
+            {busy ? 'Creating…' : 'Create next cycle'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }
 
@@ -335,7 +498,7 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
             <div className="muted">
               {payApp.subcontractor_name
                 ? `${payApp.subcontractor_name}${payApp.subcontractor_trade ? ` · ${payApp.subcontractor_trade}` : ''}`
-                : 'No vendor assigned'}
+                : 'Owner billing'}
             </div>
           </div>
           <div className="payapp-header-meta">

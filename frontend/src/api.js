@@ -65,6 +65,14 @@ export const api = {
   getPayApp: (id) => request(`/pay-apps/${id}`),
   createPayApp: (data) =>
     request('/pay-apps', { method: 'POST', body: JSON.stringify(data) }),
+  // Start the next pay-app cycle for a project (or owner-side: subcontractor_id=null).
+  // Copies the prior pay app's line items with totals rolled forward, or seeds from
+  // budget lines if no prior pay app exists.
+  autoCreatePayApp: ({ project_id, subcontractor_id = null }) =>
+    request('/pay-apps/auto-create', {
+      method: 'POST',
+      body: JSON.stringify({ project_id, subcontractor_id }),
+    }),
   updatePayApp: (id, data) =>
     request(`/pay-apps/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deletePayApp: (id) =>

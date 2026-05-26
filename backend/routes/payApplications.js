@@ -162,6 +162,160 @@ router.post('/', (req, res) => {
   res.status(201).json(withTotals(db, row));
 });
 
+// POST /api/pay-apps/auto-create — start the next pay-app cycle for a project.
+//
+// This is the big time-saver for monthly Owner billings (and works for sub
+// pay apps too). Behavior:
+//
+//   1. Look up the LATEST pay app for the given (project_id, subcontractor_id)
+//      combo. Pass subcontractor_id=null (or omit) to target Owner pay apps.
+//   2. If one exists:
+//        - app_number = prior.app_number + 1
+//        - period_start = day after prior.period_end (or first of next month
+//          if prior period_end is missing)
+//        - period_end   = end of that month
+//        - Copy every prior line item, with:
+//             completed_previous = prior (completed_previous + completed_this_period + stored_materials)
+//             completed_this_period = 0  (filled in by user this cycle)
+//             stored_materials      = 0  (rolled into completed_previous already)
+//        - Carry over: contract_sum, change_orders, retainage_pct
+//      If no prior pay app exists:
+//        - app_number = 1
+//        - Seed line items from project budget_lines (Schedule of Values starter)
+//        - period defaults to current month
+//
+// Returns the new pay app with totals so the UI can navigate straight into it.
+router.post('/auto-create', (req, res) => {
+  const db = getDb();
+  const project_id = Number(req.body.project_id);
+  const subcontractor_id = req.body.subcontractor_id == null
+    ? null
+    : Number(req.body.subcontractor_id);
+  if (!project_id) {
+    return res.status(400).json({ error: 'project_id is required' });
+  }
+
+  const prior = db.prepare(`
+    SELECT * FROM pay_applications
+    WHERE project_id = ?
+      AND (subcontractor_id = ? OR (? IS NULL AND subcontractor_id IS NULL))
+    ORDER BY app_number DESC
+    LIMIT 1
+  `).get(project_id, subcontractor_id, subcontractor_id);
+
+  // Compute next period (best-effort; user can adjust in the UI).
+  function nextPeriod() {
+    if (prior && prior.period_end) {
+      const end = new Date(prior.period_end + 'T00:00:00Z');
+      const start = new Date(end);
+      start.setUTCDate(end.getUTCDate() + 1);
+      const monthEnd = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 0));
+      return {
+        period_start: start.toISOString().slice(0, 10),
+        period_end: monthEnd.toISOString().slice(0, 10),
+      };
+    }
+    // No prior, or prior has no period: default to current calendar month.
+    const now = new Date();
+    const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0));
+    return {
+      period_start: start.toISOString().slice(0, 10),
+      period_end: end.toISOString().slice(0, 10),
+    };
+  }
+  const { period_start, period_end } = nextPeriod();
+
+  // Run insertion + line seeding in a transaction so a partial failure leaves
+  // no orphaned header behind.
+  const result = db.transaction(() => {
+    const app_number = prior ? prior.app_number + 1 : 1;
+    const info = db.prepare(`
+      INSERT INTO pay_applications
+        (project_id, subcontractor_id, app_number,
+         period_start, period_end,
+         status, contract_sum, change_orders, retainage_pct, notes)
+      VALUES
+        (@project_id, @subcontractor_id, @app_number,
+         @period_start, @period_end,
+         'draft', @contract_sum, @change_orders, @retainage_pct, NULL)
+    `).run({
+      project_id,
+      subcontractor_id,
+      app_number,
+      period_start,
+      period_end,
+      contract_sum: prior?.contract_sum ?? 0,
+      change_orders: prior?.change_orders ?? 0,
+      retainage_pct: prior?.retainage_pct ?? 10,
+    });
+    const newId = info.lastInsertRowid;
+
+    if (prior) {
+      // Copy lines from prior, rolling totals forward.
+      const priorLines = db.prepare(`
+        SELECT * FROM pay_app_lines WHERE pay_app_id = ?
+        ORDER BY sort_order ASC, id ASC
+      `).all(prior.id);
+      const insertLine = db.prepare(`
+        INSERT INTO pay_app_lines
+          (pay_app_id, budget_line_id, description,
+           scheduled_value, completed_previous,
+           completed_this_period, stored_materials, sort_order)
+        VALUES
+          (@pay_app_id, @budget_line_id, @description,
+           @scheduled_value, @completed_previous,
+           0, 0, @sort_order)
+      `);
+      for (const l of priorLines) {
+        const rolled = Number(l.completed_previous || 0)
+          + Number(l.completed_this_period || 0)
+          + Number(l.stored_materials || 0);
+        insertLine.run({
+          pay_app_id: newId,
+          budget_line_id: l.budget_line_id,
+          description: l.description,
+          scheduled_value: l.scheduled_value,
+          completed_previous: rolled,
+          sort_order: l.sort_order ?? 0,
+        });
+      }
+    } else {
+      // First pay app for this combo: seed from project budget as a starter
+      // Schedule of Values. User can edit/remove freely.
+      const budgetLines = db.prepare(`
+        SELECT * FROM budget_lines WHERE project_id = ?
+        ORDER BY id ASC
+      `).all(project_id);
+      if (budgetLines.length > 0) {
+        const insertLine = db.prepare(`
+          INSERT INTO pay_app_lines
+            (pay_app_id, budget_line_id, description,
+             scheduled_value, completed_previous,
+             completed_this_period, stored_materials, sort_order)
+          VALUES
+            (@pay_app_id, @budget_line_id, @description,
+             @scheduled_value, 0, 0, 0, @sort_order)
+        `);
+        budgetLines.forEach((b, idx) => {
+          insertLine.run({
+            pay_app_id: newId,
+            budget_line_id: b.id,
+            description: b.description || b.category || b.cost_code || `Line ${idx + 1}`,
+            scheduled_value: b.budgeted_amount || 0,
+            sort_order: idx,
+          });
+        });
+      }
+    }
+
+    return newId;
+  })();
+
+  const row = db.prepare('SELECT * FROM pay_applications WHERE id = ?').get(result);
+  res.status(201).json({ ...withTotals(db, row), seeded_from: prior ? 'prior_pay_app' : 'project_budget' });
+});
+
 // PATCH /api/pay-apps/:id
 router.patch('/:id', (req, res) => {
   const db = getDb();

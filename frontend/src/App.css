@@ -1309,3 +1309,15 @@
 .lien-warning-banner li {
   margin: 2px 0;
 }
+
+/* "Owner billing" badge in Pay Apps list */
+.badge-owner {
+  display: inline-block;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  background: #ede9fe;
+  color: #5b21b6;
+  border-radius: 4px;
+  white-space: nowrap;
+}

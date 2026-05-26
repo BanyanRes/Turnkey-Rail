@@ -188,3 +188,53 @@ CREATE TABLE IF NOT EXISTS invitations (
 
 CREATE INDEX IF NOT EXISTS idx_invitations_token ON invitations(token);
 CREATE INDEX IF NOT EXISTS idx_invitations_email ON invitations(email);
+
+-- Lien waivers (California civil code §8132-8138 style)
+--
+-- Tracks lien waivers in BOTH directions:
+--   inbound  — subs → us (GC). Received with/after we pay them.
+--   outbound — us → owner. Issued with/after owner pays us.
+--
+-- Four flavors of waiver_type apply to both directions:
+--   conditional_progress    — given w/ a progress pay app; takes effect only on payment
+--   unconditional_progress  — given AFTER payment of a progress pay app; permanent
+--   conditional_final       — given w/ the final pay app
+--   unconditional_final     — given AFTER final payment; releases retainage too
+--
+-- through_date = date through which the waiver covers work performed.
+-- Work done after through_date is NOT waived and is still lienable.
+--
+-- INBOUND fields:
+--   subcontractor_id REQUIRED (which sub signed it)
+--   pay_app_id optional (most tie to a pay app, but ad-hoc waivers happen)
+--
+-- OUTBOUND fields:
+--   subcontractor_id NULL (we are the signer, not a sub)
+--   period_start / period_end describe the billing window the waiver covers
+--
+-- document_id links to the uploaded PDF in the documents table. Nullable so
+-- you can stub-record a waiver before the signed PDF comes back.
+CREATE TABLE IF NOT EXISTS lien_waivers (
+  id                INTEGER PRIMARY KEY AUTOINCREMENT,
+  direction         TEXT    NOT NULL DEFAULT 'inbound',   -- inbound | outbound
+  project_id        INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  subcontractor_id  INTEGER REFERENCES subcontractors(id) ON DELETE CASCADE,
+  pay_app_id        INTEGER REFERENCES pay_applications(id) ON DELETE SET NULL,
+  waiver_type       TEXT    NOT NULL,
+    -- conditional_progress | unconditional_progress | conditional_final | unconditional_final
+  amount            REAL    NOT NULL DEFAULT 0,    -- amount covered by this waiver
+  through_date      TEXT,                          -- ISO yyyy-mm-dd; work through this date is waived
+  signed_date       TEXT,                          -- ISO yyyy-mm-dd; when signed
+  period_start      TEXT,                          -- outbound only; billing period start
+  period_end        TEXT,                          -- outbound only; billing period end
+  document_id       INTEGER REFERENCES documents(id) ON DELETE SET NULL,
+  notes             TEXT,
+  created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at        TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_liens_project ON lien_waivers(project_id);
+CREATE INDEX IF NOT EXISTS idx_liens_sub ON lien_waivers(subcontractor_id);
+CREATE INDEX IF NOT EXISTS idx_liens_payapp ON lien_waivers(pay_app_id);
+CREATE INDEX IF NOT EXISTS idx_liens_type ON lien_waivers(waiver_type);
+CREATE INDEX IF NOT EXISTS idx_liens_direction ON lien_waivers(direction);

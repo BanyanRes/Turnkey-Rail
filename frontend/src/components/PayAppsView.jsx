@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import { fmtMoney, parseMoney } from '../utils';
 import { canEdit } from '../permissions';
+import LienWaiversSection from './LienWaiversSection';
 
 const STATUS_LABELS = {
   draft: 'Draft',
@@ -426,6 +427,8 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
         {showNewLine && (
           <NewLineForm onCreate={addLine} onCancel={() => setShowNewLine(false)} />
         )}
+
+        <LienWaiversSection payApp={payApp} editable={editable} />
 
         <SummaryPanel payApp={payApp} />
       </main>

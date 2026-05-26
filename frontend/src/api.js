@@ -120,6 +120,21 @@ export const api = {
   documentUrl: (id, { download = false } = {}) =>
     `/api/documents/${id}/download${download ? '?download=1' : ''}`,
 
+  // Lien waivers (both inbound from subs and outbound to owner)
+  listLienWaivers: (params = {}) => {
+    const q = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v != null && v !== '')
+    ).toString();
+    return request(`/lien-waivers${q ? `?${q}` : ''}`);
+  },
+  getLienWaiver: (id) => request(`/lien-waivers/${id}`),
+  createLienWaiver: (data) =>
+    request('/lien-waivers', { method: 'POST', body: JSON.stringify(data) }),
+  updateLienWaiver: (id, data) =>
+    request(`/lien-waivers/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteLienWaiver: (id) =>
+    request(`/lien-waivers/${id}`, { method: 'DELETE' }),
+
   // Schedule tasks
   listTasks: (projectId) => request(`/tasks?project_id=${projectId}`),
   createTask: (data) =>

@@ -8,6 +8,7 @@ export const TABS = [
   { id: 'payapps', label: 'Pay Apps' },
   { id: 'changeorders', label: 'Change Orders' },
   { id: 'documents', label: 'Documents' },
+  { id: 'liens', label: 'Liens' },
 ];
 
 export const FEATURE_LEVELS = [
@@ -20,17 +21,17 @@ export const PRESETS = {
   admin: {
     admin: 'full',
     projects: 'full', schedule: 'full', vendors: 'full',
-    payapps: 'full', changeorders: 'full', documents: 'full',
+    payapps: 'full', changeorders: 'full', documents: 'full', liens: 'full',
   },
   editor: {
     admin: 'none',
     projects: 'full', schedule: 'full', vendors: 'full',
-    payapps: 'full', changeorders: 'full', documents: 'full',
+    payapps: 'full', changeorders: 'full', documents: 'full', liens: 'full',
   },
   viewer: {
     admin: 'none',
     projects: 'read', schedule: 'read', vendors: 'read',
-    payapps: 'read', changeorders: 'read', documents: 'read',
+    payapps: 'read', changeorders: 'read', documents: 'read', liens: 'read',
   },
 };
 
@@ -51,7 +52,7 @@ export const PRESET_DESCRIPTIONS = {
 const NONE_PERMS = {
   admin: 'none',
   projects: 'none', schedule: 'none', vendors: 'none',
-  payapps: 'none', changeorders: 'none', documents: 'none',
+  payapps: 'none', changeorders: 'none', documents: 'none', liens: 'none',
 };
 
 export function normalize(obj) {

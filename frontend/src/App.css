@@ -1255,3 +1255,27 @@
   font-size: 14px;
   font-weight: 500;
 }
+
+/* Liens tab: direction segmented toggle */
+.seg-toggle {
+  display: inline-flex;
+  border: 1px solid var(--border, #d4d4d8);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.seg-toggle button {
+  background: transparent;
+  border: 0;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--muted, #71717a);
+}
+.seg-toggle button + button {
+  border-left: 1px solid var(--border, #d4d4d8);
+}
+.seg-toggle button.seg-active {
+  background: #18181b;
+  color: white;
+  font-weight: 500;
+}

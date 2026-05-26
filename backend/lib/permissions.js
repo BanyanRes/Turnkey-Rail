@@ -9,7 +9,7 @@
 //
 // Env-var (root) users always get the admin preset, regardless of what's in DB.
 
-const TABS = ['projects', 'schedule', 'vendors', 'payapps', 'changeorders', 'documents'];
+const TABS = ['projects', 'schedule', 'vendors', 'payapps', 'changeorders', 'documents', 'liens'];
 const FEATURE_LEVELS = ['none', 'read', 'full'];
 const ADMIN_LEVELS = ['none', 'full'];
 
@@ -17,24 +17,24 @@ const PRESETS = {
   admin: {
     admin: 'full',
     projects: 'full', schedule: 'full', vendors: 'full',
-    payapps: 'full', changeorders: 'full', documents: 'full',
+    payapps: 'full', changeorders: 'full', documents: 'full', liens: 'full',
   },
   editor: {
     admin: 'none',
     projects: 'full', schedule: 'full', vendors: 'full',
-    payapps: 'full', changeorders: 'full', documents: 'full',
+    payapps: 'full', changeorders: 'full', documents: 'full', liens: 'full',
   },
   viewer: {
     admin: 'none',
     projects: 'read', schedule: 'read', vendors: 'read',
-    payapps: 'read', changeorders: 'read', documents: 'read',
+    payapps: 'read', changeorders: 'read', documents: 'read', liens: 'read',
   },
 };
 
 const NONE_PERMS = {
   admin: 'none',
   projects: 'none', schedule: 'none', vendors: 'none',
-  payapps: 'none', changeorders: 'none', documents: 'none',
+  payapps: 'none', changeorders: 'none', documents: 'none', liens: 'none',
 };
 
 // Coerce any input into a valid permissions object. Unknown fields are dropped,

@@ -6,17 +6,20 @@ import PayAppsView from './components/PayAppsView';
 import ChangeOrdersView from './components/ChangeOrdersView';
 import DocumentsView from './components/DocumentsView';
 import ScheduleView from './components/ScheduleView';
+import LiensView from './components/LiensView';
 import AdminView from './components/AdminView';
 import InviteAcceptView from './components/InviteAcceptView';
+import { canView } from './permissions';
 import './App.css';
 
 const BASE_TABS = [
-  { id: 'projects', label: 'Projects' },
-  { id: 'schedule', label: 'Schedule' },
-  { id: 'vendors', label: 'Vendors' },
-  { id: 'payapps', label: 'Pay Apps' },
-  { id: 'cos', label: 'Change Orders' },
-  { id: 'docs', label: 'Documents' },
+  { id: 'projects', label: 'Projects', perm: 'projects' },
+  { id: 'schedule', label: 'Schedule', perm: 'schedule' },
+  { id: 'vendors', label: 'Vendors', perm: 'vendors' },
+  { id: 'payapps', label: 'Pay Apps', perm: 'payapps' },
+  { id: 'cos', label: 'Change Orders', perm: 'changeorders' },
+  { id: 'docs', label: 'Documents', perm: 'documents' },
+  { id: 'liens', label: 'Liens', perm: 'liens' },
 ];
 
 // Returns the token from /invite/<token>, or null if we're not on an invite URL.
@@ -45,9 +48,15 @@ function MainApp() {
     api.getMe().then(setMe).catch(() => setMe(null));
   }, []);
 
-  const tabs = me?.is_admin
-    ? [...BASE_TABS, { id: 'admin', label: 'Admin' }]
+  // Filter tabs to ones the user can actually view (env-admin sees all).
+  // Defaults to all tabs while `me` is still loading to avoid an empty nav flash.
+  const visibleBaseTabs = me
+    ? BASE_TABS.filter((t) => canView(me, t.perm))
     : BASE_TABS;
+
+  const tabs = me?.is_admin
+    ? [...visibleBaseTabs, { id: 'admin', label: 'Admin' }]
+    : visibleBaseTabs;
 
   return (
     <div className="app">
@@ -81,6 +90,7 @@ function MainApp() {
         {tab === 'payapps' && <PayAppsView me={me} />}
         {tab === 'cos' && <ChangeOrdersView me={me} />}
         {tab === 'docs' && <DocumentsView me={me} />}
+        {tab === 'liens' && <LiensView me={me} />}
         {tab === 'admin' && me?.is_admin && <AdminView me={me} />}
       </div>
     </div>

@@ -174,7 +174,7 @@ app.use('/api/pay-app-lines', gate('payapps'), require('./routes/payAppLines'));
 app.use('/api/change-orders', gate('changeorders'), require('./routes/changeOrders'));
 app.use('/api/documents', gate('documents'), require('./routes/documents'));
 app.use('/api/tasks', gate('schedule'), require('./routes/tasks'));
-app.use('/api/lien-waivers', gate('payapps'), require('./routes/lienWaivers'));
+app.use('/api/lien-waivers', gate('liens'), require('./routes/lienWaivers'));
 app.use('/api/users', requireAdmin, require('./routes/users'));
 app.use('/api/invitations', require('./routes/invitations'));
 

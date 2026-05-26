@@ -55,6 +55,25 @@ function runMigrations(db) {
     db.prepare("UPDATE users SET permissions = ? WHERE is_admin = 0 AND (permissions IS NULL OR permissions = '{}' OR permissions = '')").run(viewerPerms);
     console.log('[db migrate] users.permissions backfilled');
   }
+
+  // Backfill 'liens' permission for any user rows missing it. Match the user's
+  // existing payapps level so liens visibility tracks pay-app visibility for
+  // pre-Liens-tab accounts.
+  const rows = db.prepare("SELECT id, permissions FROM users WHERE permissions IS NOT NULL AND permissions != ''").all();
+  let liensAdded = 0;
+  for (const r of rows) {
+    let parsed;
+    try { parsed = JSON.parse(r.permissions); } catch { continue; }
+    if (typeof parsed !== 'object' || parsed === null) continue;
+    if ('liens' in parsed) continue;
+    parsed.liens = parsed.payapps || 'none';
+    db.prepare("UPDATE users SET permissions = ? WHERE id = ?")
+      .run(JSON.stringify(parsed), r.id);
+    liensAdded++;
+  }
+  if (liensAdded > 0) {
+    console.log(`[db migrate] users.permissions.liens backfilled on ${liensAdded} row(s)`);
+  }
 }
 
 function getDb() {

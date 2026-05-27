@@ -220,4 +220,117 @@ router.post('/:id/budget/bulk', (req, res) => {
   res.json(result);
 });
 
+// =============================================================
+// Reconciliation: owner billed vs sub owed, per project.
+//
+// The point: a GC bills the owner on one side, pays subs on the other,
+// and the difference is margin. Until now those two sides have lived in
+// separate pay apps with no shared view. This endpoint joins them.
+//
+// Optional ?period=YYYY-MM filters pay apps whose period_end falls in
+// that month. Without it, "this period" rows are skipped and only
+// cumulative numbers are returned.
+// =============================================================
+router.get('/:id/reconciliation', (req, res) => {
+  const db = getDb();
+  const projectId = Number(req.params.id);
+  const period = req.query.period; // 'YYYY-MM' or undefined
+
+  const project = db.prepare(
+    'SELECT id, code, name, contract_amount FROM projects WHERE id = ?'
+  ).get(projectId);
+  if (!project) return res.status(404).json({ error: 'project not found' });
+
+  // Pull every pay app for this project with line totals computed inline.
+  // We re-derive totals here instead of importing withTotals from
+  // payApplications.js to avoid a cross-route require cycle.
+  const payApps = db.prepare(`
+    SELECT
+      pa.id, pa.app_number, pa.subcontractor_id, pa.status,
+      pa.period_start, pa.period_end, pa.retainage_pct,
+      pa.contract_sum, pa.change_orders,
+      s.name AS subcontractor_name, s.trade AS subcontractor_trade,
+      COALESCE((
+        SELECT SUM(completed_previous + completed_this_period + stored_materials)
+        FROM pay_app_lines WHERE pay_app_id = pa.id
+      ), 0) AS total_completed,
+      COALESCE((
+        SELECT SUM(completed_this_period)
+        FROM pay_app_lines WHERE pay_app_id = pa.id
+      ), 0) AS this_period_total,
+      COALESCE((
+        SELECT SUM(completed_previous)
+        FROM pay_app_lines WHERE pay_app_id = pa.id
+      ), 0) AS prior_total
+    FROM pay_applications pa
+    LEFT JOIN subcontractors s ON s.id = pa.subcontractor_id
+    WHERE pa.project_id = ?
+    ORDER BY pa.subcontractor_id IS NULL DESC, s.name ASC, pa.app_number ASC
+  `).all(projectId);
+
+  // Derive each pay app's billed/due figures (net of retainage), and a flag
+  // for whether it falls inside the requested period.
+  const inPeriod = (pe) => {
+    if (!period || !pe) return false;
+    return String(pe).startsWith(period); // pe is yyyy-mm-dd
+  };
+
+  const rows = payApps.map((p) => {
+    const retPct = Number(p.retainage_pct || 0) / 100;
+    const total = Number(p.total_completed || 0);
+    const prior = Number(p.prior_total || 0);
+    const earnedLessRet = total * (1 - retPct);
+    const priorNet = prior * (1 - retPct);
+    const currentDue = earnedLessRet - priorNet;
+    return {
+      pay_app_id: p.id,
+      app_number: p.app_number,
+      side: p.subcontractor_id == null ? 'owner' : 'sub',
+      subcontractor_id: p.subcontractor_id,
+      subcontractor_name: p.subcontractor_name,
+      subcontractor_trade: p.subcontractor_trade,
+      status: p.status,
+      period_start: p.period_start,
+      period_end: p.period_end,
+      contract_sum: Number(p.contract_sum || 0),
+      change_orders: Number(p.change_orders || 0),
+      revised_contract: Number(p.contract_sum || 0) + Number(p.change_orders || 0),
+      total_completed: total,
+      earned_less_retainage: earnedLessRet,
+      current_due: currentDue,
+      this_period_total: Number(p.this_period_total || 0),
+      in_period: inPeriod(p.period_end),
+    };
+  });
+
+  // Aggregate by side. "billed_cumulative" = earned less retainage (what the
+  // payer owes us / we owe them once retainage releases). "this_period_due" =
+  // only pay apps whose period_end is inside ?period.
+  const sumOwner = { billed_cumulative: 0, this_period_due: 0, outstanding: 0 };
+  const sumSub = { billed_cumulative: 0, this_period_due: 0, outstanding: 0 };
+  for (const r of rows) {
+    const bucket = r.side === 'owner' ? sumOwner : sumSub;
+    bucket.billed_cumulative += r.earned_less_retainage;
+    if (r.in_period) bucket.this_period_due += r.current_due;
+    if (r.status !== 'paid') bucket.outstanding += r.current_due;
+  }
+
+  res.json({
+    project: {
+      id: project.id,
+      code: project.code,
+      name: project.name,
+      contract_amount: Number(project.contract_amount || 0),
+    },
+    period: period || null,
+    owner: sumOwner,
+    sub: sumSub,
+    margin: {
+      cumulative: sumOwner.billed_cumulative - sumSub.billed_cumulative,
+      this_period: sumOwner.this_period_due - sumSub.this_period_due,
+    },
+    rows,
+  });
+});
+
 module.exports = router;

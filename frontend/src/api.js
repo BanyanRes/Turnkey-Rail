@@ -19,6 +19,10 @@ export const api = {
   // Projects
   listProjects: () => request('/projects'),
   getProject: (id) => request(`/projects/${id}`),
+  getProjectReconciliation: (id, period) => {
+    const qs = period ? `?period=${encodeURIComponent(period)}` : '';
+    return request(`/projects/${id}/reconciliation${qs}`);
+  },
   createProject: (data) =>
     request('/projects', { method: 'POST', body: JSON.stringify(data) }),
   updateProject: (id, data) =>

@@ -1,7 +1,16 @@
 // Pay applications + line items
 const express = require('express');
+const multer = require('multer');
+const ExcelJS = require('exceljs');
 const { getDb } = require('../db/database');
 const { renderPayAppPdf } = require('../lib/payAppPdf');
+
+// In-memory storage for the SoV import endpoint — we parse the spreadsheet
+// once and discard the buffer, no need to persist the file to disk.
+const sovUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB is plenty for SoV-sized sheets
+});
 
 const router = express.Router();
 
@@ -496,5 +505,243 @@ router.post('/:id/lines', (req, res) => {
   const line = db.prepare('SELECT * FROM pay_app_lines WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(line);
 });
+
+// ============================================================
+// SOV EXCEL IMPORT / EXPORT
+// ============================================================
+//
+// The Schedule of Values is the row-by-row backbone of every pay app. For a
+// 100-line project, hand-entering it is painful. These two endpoints let the
+// user round-trip the SoV through Excel:
+//   - GET /:id/sov-template downloads an xlsx pre-filled with the current SoV
+//     (or a blank skeleton if there are no lines yet).
+//   - POST /:id/sov-import parses an uploaded xlsx and either replaces or
+//     appends to the current SoV.
+//
+// Column contract (header row 1, lines start row 2):
+//   A: Description
+//   B: Scheduled Value
+//   C: Prior (completed_previous)
+//   D: This Period (completed_this_period)
+//   E: Stored
+//
+// We intentionally do NOT round-trip Total / % / To finish — those are derived.
+
+// GET /api/pay-apps/:id/sov-template
+// Returns an xlsx with column headers + existing line items (if any).
+router.get('/:id/sov-template', async (req, res) => {
+  const db = getDb();
+  const header = db.prepare(`
+    SELECT pa.*, p.code AS project_code, p.name AS project_name
+    FROM pay_applications pa
+    JOIN projects p ON p.id = pa.project_id
+    WHERE pa.id = ?
+  `).get(req.params.id);
+  if (!header) return res.status(404).json({ error: 'Pay application not found' });
+
+  const lines = db.prepare(`
+    SELECT * FROM pay_app_lines WHERE pay_app_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(req.params.id);
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Turnkey Rail';
+  wb.created = new Date();
+  const ws = wb.addWorksheet('Schedule of Values', {
+    views: [{ state: 'frozen', ySplit: 1 }],
+  });
+
+  ws.columns = [
+    { header: 'Description', key: 'description', width: 48 },
+    { header: 'Scheduled Value', key: 'scheduled_value', width: 18, style: { numFmt: '$#,##0.00' } },
+    { header: 'Prior', key: 'completed_previous', width: 14, style: { numFmt: '$#,##0.00' } },
+    { header: 'This Period', key: 'completed_this_period', width: 14, style: { numFmt: '$#,##0.00' } },
+    { header: 'Stored', key: 'stored_materials', width: 14, style: { numFmt: '$#,##0.00' } },
+  ];
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).alignment = { horizontal: 'center' };
+  ws.getRow(1).fill = {
+    type: 'pattern',
+    pattern: 'solid',
+    fgColor: { argb: 'FFE5E7EB' },
+  };
+
+  if (lines.length === 0) {
+    // Empty template: give the user 10 blank rows to fill in.
+    for (let i = 0; i < 10; i++) {
+      ws.addRow({ description: '', scheduled_value: 0, completed_previous: 0, completed_this_period: 0, stored_materials: 0 });
+    }
+  } else {
+    for (const l of lines) {
+      ws.addRow({
+        description: l.description,
+        scheduled_value: Number(l.scheduled_value || 0),
+        completed_previous: Number(l.completed_previous || 0),
+        completed_this_period: Number(l.completed_this_period || 0),
+        stored_materials: Number(l.stored_materials || 0),
+      });
+    }
+  }
+
+  const filename = `SoV_${header.project_code}_PayApp${header.app_number}.xlsx`;
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  await wb.xlsx.write(res);
+  res.end();
+});
+
+// POST /api/pay-apps/:id/sov-import — multipart upload, field name "file".
+// Query: ?mode=replace (default) | append
+// On replace mode the existing pay_app_lines for this pay app are wiped first.
+router.post('/:id/sov-import', sovUpload.single('file'), async (req, res) => {
+  const db = getDb();
+  const payApp = db.prepare('SELECT id FROM pay_applications WHERE id = ?').get(req.params.id);
+  if (!payApp) return res.status(404).json({ error: 'Pay application not found' });
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
+  const mode = req.query.mode === 'append' ? 'append' : 'replace';
+
+  let parsed;
+  try {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(req.file.buffer);
+    const ws = wb.worksheets[0];
+    if (!ws) return res.status(400).json({ error: 'Workbook contains no sheets' });
+    parsed = parseSoVSheet(ws);
+  } catch (e) {
+    return res.status(400).json({ error: `Failed to parse spreadsheet: ${e.message}` });
+  }
+
+  if (parsed.errors.length > 0 && parsed.rows.length === 0) {
+    return res.status(400).json({ error: 'No valid rows found', details: parsed.errors });
+  }
+
+  // Apply changes in a single transaction.
+  const tx = db.transaction(() => {
+    if (mode === 'replace') {
+      db.prepare('DELETE FROM pay_app_lines WHERE pay_app_id = ?').run(payApp.id);
+    }
+    const baseSort = mode === 'append'
+      ? (db.prepare('SELECT COALESCE(MAX(sort_order), -1) + 1 AS next FROM pay_app_lines WHERE pay_app_id = ?').get(payApp.id).next)
+      : 0;
+    const insert = db.prepare(`
+      INSERT INTO pay_app_lines
+        (pay_app_id, description,
+         scheduled_value, completed_previous,
+         completed_this_period, stored_materials, sort_order)
+      VALUES
+        (@pay_app_id, @description,
+         @scheduled_value, @completed_previous,
+         @completed_this_period, @stored_materials, @sort_order)
+    `);
+    parsed.rows.forEach((r, idx) => {
+      insert.run({
+        pay_app_id: payApp.id,
+        description: r.description,
+        scheduled_value: r.scheduled_value,
+        completed_previous: r.completed_previous,
+        completed_this_period: r.completed_this_period,
+        stored_materials: r.stored_materials,
+        sort_order: baseSort + idx,
+      });
+    });
+  });
+  tx();
+
+  // Return the updated pay app so the UI can refresh in one round trip.
+  const headerRow = db.prepare(`
+    SELECT pa.*, p.code AS project_code, p.name AS project_name,
+           s.name AS subcontractor_name, s.trade AS subcontractor_trade
+    FROM pay_applications pa
+    JOIN projects p ON p.id = pa.project_id
+    LEFT JOIN subcontractors s ON s.id = pa.subcontractor_id
+    WHERE pa.id = ?
+  `).get(payApp.id);
+  const lines = db.prepare(`
+    SELECT * FROM pay_app_lines WHERE pay_app_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(payApp.id);
+
+  res.json({
+    imported: parsed.rows.length,
+    skipped: parsed.errors.length,
+    skip_reasons: parsed.errors,
+    mode,
+    pay_app: { ...withTotals(db, headerRow), lines },
+  });
+});
+
+// Pull rows out of a worksheet. Tolerates:
+//   - Any row order (we key by header cell text in row 1)
+//   - Header capitalization / extra spaces
+//   - Missing optional columns (Prior, This Period, Stored default to 0)
+//   - Currency formatting ($ signs, commas) from Excel cells
+function parseSoVSheet(ws) {
+  // Build a column index map from header row (row 1). Accept reasonable
+  // aliases so users can hand us a sheet that doesn't match our template
+  // exactly.
+  const aliases = {
+    description: ['description', 'desc', 'item', 'line', 'work'],
+    scheduled_value: ['scheduled value', 'scheduled', 'sov', 'value', 'amount', 'contract'],
+    completed_previous: ['prior', 'completed previous', 'previous', 'prior period'],
+    completed_this_period: ['this period', 'completed this period', 'this month', 'current'],
+    stored_materials: ['stored', 'stored materials', 'materials stored'],
+  };
+  const headerCells = ws.getRow(1).values; // 1-indexed array
+  const colMap = {};
+  headerCells.forEach((v, idx) => {
+    if (!v) return;
+    const text = String(v).trim().toLowerCase();
+    for (const [field, opts] of Object.entries(aliases)) {
+      if (opts.includes(text)) {
+        colMap[field] = idx;
+        return;
+      }
+    }
+  });
+  if (colMap.description == null) {
+    throw new Error('Missing required "Description" column in row 1');
+  }
+  if (colMap.scheduled_value == null) {
+    throw new Error('Missing required "Scheduled Value" column in row 1');
+  }
+
+  const toNum = (cell) => {
+    if (cell == null || cell === '') return 0;
+    if (typeof cell === 'number') return cell;
+    // Strip $, commas, whitespace.
+    const cleaned = String(cell).replace(/[$,\s]/g, '');
+    const n = Number(cleaned);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const rows = [];
+  const errors = [];
+  for (let r = 2; r <= ws.rowCount; r++) {
+    const row = ws.getRow(r);
+    const descCell = row.getCell(colMap.description).value;
+    const description = descCell == null ? '' : String(descCell).trim();
+    if (!description) continue; // Skip blank rows silently
+    const scheduled_value = toNum(row.getCell(colMap.scheduled_value).value);
+    if (scheduled_value < 0) {
+      errors.push({ row: r, reason: 'Scheduled value cannot be negative' });
+      continue;
+    }
+    rows.push({
+      description,
+      scheduled_value,
+      completed_previous: colMap.completed_previous
+        ? toNum(row.getCell(colMap.completed_previous).value) : 0,
+      completed_this_period: colMap.completed_this_period
+        ? toNum(row.getCell(colMap.completed_this_period).value) : 0,
+      stored_materials: colMap.stored_materials
+        ? toNum(row.getCell(colMap.stored_materials).value) : 0,
+    });
+  }
+  return { rows, errors };
+}
 
 module.exports = { router, LINE_FIELDS };

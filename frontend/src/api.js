@@ -89,6 +89,21 @@ export const api = {
   // download=true forces an attachment; otherwise the PDF opens inline.
   payAppPdfUrl: (id, { download = false } = {}) =>
     `/api/pay-apps/${id}/pdf${download ? '?download=1' : ''}`,
+  // Schedule of Values Excel import/export. Template download is a URL the
+  // browser opens directly; import is multipart so we hit fetch by hand.
+  sovTemplateUrl: (id) => `/api/pay-apps/${id}/sov-template`,
+  importSov: async (id, file, mode = 'replace') => {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`/api/pay-apps/${id}/sov-import?mode=${mode}`, {
+      method: 'POST',
+      body: fd,
+    });
+    let data = null;
+    try { data = await res.json(); } catch {}
+    if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
+    return data;
+  },
 
   // Pay app lines
   listPayAppLines: (payAppId) => request(`/pay-apps/${payAppId}/lines`),

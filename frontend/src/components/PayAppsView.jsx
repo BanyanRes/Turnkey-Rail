@@ -426,6 +426,8 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
   const [showChangedOnly, setShowChangedOnly] = useState(false);
   // Phase 2: button busy-state while re-pulling approved-CO total.
   const [syncingCOs, setSyncingCOs] = useState(false);
+  // #9 SoV import modal.
+  const [showImport, setShowImport] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -509,6 +511,25 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
           >
             📄 Export PDF
           </a>
+          <a
+            href={api.sovTemplateUrl(payAppId)}
+            className="btn-secondary btn-sm"
+            title={payApp.lines.length > 0
+              ? 'Download an Excel template pre-filled with the current SoV'
+              : 'Download a blank SoV Excel template'}
+            style={{ textDecoration: 'none' }}
+          >
+            📊 Excel
+          </a>
+          {editable && (
+            <button
+              className="btn-secondary btn-sm"
+              onClick={() => setShowImport(true)}
+              title="Import a Schedule of Values from an Excel file"
+            >
+              📥 Import SoV
+            </button>
+          )}
           {editable ? (
             <StatusChanger current={payApp.status} onChange={changeStatus} />
           ) : (
@@ -659,6 +680,15 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
 
         <SummaryPanel payApp={payApp} />
       </main>
+
+      {showImport && (
+        <ImportSovModal
+          payAppId={payAppId}
+          hasExistingLines={payApp.lines.length > 0}
+          onClose={() => setShowImport(false)}
+          onImported={async () => { setShowImport(false); await load(); }}
+        />
+      )}
     </>
   );
 }
@@ -945,5 +975,97 @@ function NewLineForm({ onCreate, onCancel }) {
       <button type="button" onClick={onCancel} disabled={busy} className="btn-secondary btn-sm">Cancel</button>
       {error && <div className="error span-all">{error}</div>}
     </form>
+  );
+}
+
+// SoV Excel import modal. Two modes:
+//   - replace: wipe current SoV first, then load every row from the sheet.
+//   - append: keep current SoV, add the sheet's rows at the end.
+// We show a result summary after submit so the user sees how many rows landed
+// vs were skipped.
+function ImportSovModal({ payAppId, hasExistingLines, onClose, onImported }) {
+  const [file, setFile] = useState(null);
+  const [mode, setMode] = useState(hasExistingLines ? 'replace' : 'append');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!file) { setError('Choose an .xlsx file first'); return; }
+    if (mode === 'replace' && hasExistingLines
+      && !confirm('This will DELETE every existing SoV line on this pay app before importing. Continue?')) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api.importSov(payAppId, file, mode);
+      const skippedNote = result.skipped > 0
+        ? ` (${result.skipped} row${result.skipped === 1 ? '' : 's'} skipped)`
+        : '';
+      alert(`Imported ${result.imported} line${result.imported === 1 ? '' : 's'}${skippedNote}.`);
+      onImported();
+    } catch (e) {
+      setError(e.message);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <h2>Import Schedule of Values</h2>
+        <div className="muted" style={{ marginTop: -8, marginBottom: 12, fontSize: 13 }}>
+          Upload an Excel file with columns: <strong>Description</strong>, <strong>Scheduled Value</strong>,
+          and optionally <strong>Prior</strong> / <strong>This Period</strong> / <strong>Stored</strong>.
+          Header row should be row 1. Need a starting point?{' '}
+          <a href={api.sovTemplateUrl(payAppId)} target="_blank" rel="noopener noreferrer">Download a template</a>.
+        </div>
+
+        <label>
+          File *
+          <input
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+            autoFocus
+          />
+        </label>
+
+        <label>
+          Mode
+          <div className="seg-toggle" style={{ marginTop: 4 }}>
+            <button
+              type="button"
+              className={mode === 'replace' ? 'seg-active' : ''}
+              onClick={() => setMode('replace')}
+              disabled={busy}
+            >Replace all</button>
+            <button
+              type="button"
+              className={mode === 'append' ? 'seg-active' : ''}
+              onClick={() => setMode('append')}
+              disabled={busy}
+            >Append</button>
+          </div>
+          <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+            {mode === 'replace'
+              ? 'Existing SoV lines will be deleted before import.'
+              : 'New rows are added after the existing lines.'}
+          </div>
+        </label>
+
+        {error && <div className="error">{error}</div>}
+
+        <div className="modal-actions">
+          <button type="button" onClick={onClose} className="btn-secondary" disabled={busy}>
+            Cancel
+          </button>
+          <button type="submit" className="btn-primary" disabled={busy || !file}>
+            {busy ? 'Importing…' : 'Import'}
+          </button>
+        </div>
+      </form>
+    </div>
   );
 }

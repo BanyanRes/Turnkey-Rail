@@ -552,7 +552,11 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
           </div>
           <div className="payapp-header-meta">
             <PeriodEdit payApp={payApp} onSave={updateHeader} />
-            <RetainageEdit pct={payApp.retainage_pct} onSave={(v) => updateHeader({ retainage_pct: v })} />
+            <RetainageEdit
+              pct={payApp.retainage_pct}
+              onSave={(v) => updateHeader({ retainage_pct: v })}
+              editable={editable}
+            />
             <ContractSumBlock
               contractSum={payApp.contract_sum}
               changeOrders={payApp.change_orders}
@@ -750,11 +754,26 @@ function PeriodEdit({ payApp, onSave }) {
   );
 }
 
-function RetainageEdit({ pct, onSave }) {
+function RetainageEdit({ pct, onSave, editable = true }) {
   const [editing, setEditing] = useState(false);
   const [val, setVal] = useState(pct);
   useEffect(() => setVal(pct), [pct]);
-  if (editing) {
+
+  const released = Number(pct) === 0;
+
+  async function release() {
+    if (!confirm('Release retainage on this pay app? Retainage % will be set to 0, which means the full held-back amount becomes payable on the next certificate. Typically done at project closeout or for a final pay app.')) {
+      return;
+    }
+    await onSave(0);
+  }
+
+  async function reinstate() {
+    // Default back to the company-standard 10%. The user can edit it after.
+    await onSave(10);
+  }
+
+  if (editing && !released) {
     return (
       <div className="meta-item">
         <div className="label">Retainage</div>
@@ -776,10 +795,55 @@ function RetainageEdit({ pct, onSave }) {
       </div>
     );
   }
+
+  if (released) {
+    // Released state: bold "released" affordance plus a quiet escape hatch
+    // (Reinstate) in case the user clicked through the confirm by mistake.
+    return (
+      <div className="meta-item retainage-released">
+        <div className="label">Retainage</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <span className="strong" style={{ color: '#10b981' }}>Released ✓</span>
+          {editable && (
+            <button
+              type="button"
+              className="btn-icon"
+              onClick={reinstate}
+              title="Set retainage back to 10% (in case this was released by mistake)"
+              style={{ fontSize: 11, padding: '0 4px', color: '#6b7280' }}
+            >
+              Reinstate
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="meta-item" onClick={() => setEditing(true)} style={{ cursor: 'pointer' }}>
+    <div className="meta-item">
       <div className="label">Retainage</div>
-      <div className="strong">{pct}%</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          className="strong"
+          onClick={() => editable && setEditing(true)}
+          style={{ cursor: editable ? 'pointer' : 'default' }}
+          title={editable ? 'Click to edit %' : ''}
+        >
+          {pct}%
+        </span>
+        {editable && (
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={release}
+            title="Release retainage (set to 0% — typically at final pay app or project closeout)"
+            style={{ fontSize: 11, padding: '0 6px', color: '#6b7280' }}
+          >
+            Release
+          </button>
+        )}
+      </div>
     </div>
   );
 }

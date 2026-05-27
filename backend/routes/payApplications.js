@@ -57,6 +57,31 @@ function withTotals(db, header) {
   };
 }
 
+// Sum of approved change orders on a project. Optionally filter to a specific
+// subcontractor — pass subcontractor_id=null to sum the project-wide totals
+// (i.e. what Owner sees) including subs and project-direct change orders.
+function sumApprovedChangeOrders(db, project_id, subcontractor_id) {
+  if (subcontractor_id == null) {
+    // Owner side: every approved CO on the project counts toward what the
+    // owner ultimately owes us, regardless of which sub it ties to.
+    const row = db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM change_orders
+      WHERE project_id = ? AND status = 'approved'
+    `).get(project_id);
+    return Number(row?.total || 0);
+  }
+  // Sub side: only COs tied to this sub (or project-level COs without a sub).
+  const row = db.prepare(`
+    SELECT COALESCE(SUM(amount), 0) AS total
+    FROM change_orders
+    WHERE project_id = ?
+      AND status = 'approved'
+      AND (subcontractor_id = ? OR subcontractor_id IS NULL)
+  `).get(project_id, subcontractor_id);
+  return Number(row?.total || 0);
+}
+
 // ============================================================
 // PAY APPLICATIONS
 // ============================================================
@@ -247,7 +272,10 @@ router.post('/auto-create', (req, res) => {
       period_start,
       period_end,
       contract_sum: prior?.contract_sum ?? 0,
-      change_orders: prior?.change_orders ?? 0,
+      // Auto-pull current approved change orders. Owner-side gets ALL approved
+      // COs on the project; sub-side gets that sub's plus any project-level COs.
+      // User can still override this on the PA detail page later.
+      change_orders: sumApprovedChangeOrders(db, project_id, subcontractor_id),
       retainage_pct: prior?.retainage_pct ?? 10,
     });
     const newId = info.lastInsertRowid;
@@ -347,6 +375,25 @@ router.delete('/:id', (req, res) => {
   const result = db.prepare('DELETE FROM pay_applications WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Pay application not found' });
   res.json({ ok: true, deleted: Number(req.params.id) });
+});
+
+// POST /api/pay-apps/:id/refresh-change-orders — re-pull approved CO total
+// for an existing pay app. Useful when COs get approved AFTER the pay app
+// was created and the user wants to update line 2 without re-typing.
+router.post('/:id/refresh-change-orders', (req, res) => {
+  const db = getDb();
+  const existing = db.prepare(
+    'SELECT id, project_id, subcontractor_id FROM pay_applications WHERE id = ?'
+  ).get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Pay application not found' });
+
+  const newTotal = sumApprovedChangeOrders(db, existing.project_id, existing.subcontractor_id);
+  db.prepare(
+    `UPDATE pay_applications SET change_orders = ?, updated_at = datetime('now') WHERE id = ?`
+  ).run(newTotal, existing.id);
+
+  const row = db.prepare('SELECT * FROM pay_applications WHERE id = ?').get(existing.id);
+  res.json(withTotals(db, row));
 });
 
 // GET /api/pay-apps/:id/pdf — stream an AIA G702/G703-style PDF.

@@ -77,6 +77,10 @@ export const api = {
     request(`/pay-apps/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deletePayApp: (id) =>
     request(`/pay-apps/${id}`, { method: 'DELETE' }),
+  // Re-pull the approved-change-order total for an existing pay app and store
+  // it on the header. Returns the updated pay app with computed totals.
+  refreshChangeOrders: (id) =>
+    request(`/pay-apps/${id}/refresh-change-orders`, { method: 'POST' }),
   // Returns a URL the browser can open/download to get the AIA G702/G703 PDF.
   // download=true forces an attachment; otherwise the PDF opens inline.
   payAppPdfUrl: (id, { download = false } = {}) =>

@@ -422,6 +422,10 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showNewLine, setShowNewLine] = useState(false);
+  // Phase 2: hide lines untouched this period to make monthly entry faster.
+  const [showChangedOnly, setShowChangedOnly] = useState(false);
+  // Phase 2: button busy-state while re-pulling approved-CO total.
+  const [syncingCOs, setSyncingCOs] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -470,6 +474,20 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
     onBack();
   }
 
+  // Phase 2: pull current approved CO total from the project into this pay app's
+  // change_orders field. Used by the 🔄 Sync COs button in the header.
+  async function syncChangeOrders() {
+    setSyncingCOs(true);
+    try {
+      await api.refreshChangeOrders(payAppId);
+      await load();
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSyncingCOs(false);
+    }
+  }
+
   if (loading) return <div className="vendors-main muted">Loading…</div>;
   if (error) return <div className="vendors-main"><div className="error">{error}</div></div>;
   if (!payApp) return null;
@@ -514,16 +532,32 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
           <div className="payapp-header-meta">
             <PeriodEdit payApp={payApp} onSave={updateHeader} />
             <RetainageEdit pct={payApp.retainage_pct} onSave={(v) => updateHeader({ retainage_pct: v })} />
+            <ContractSumBlock
+              contractSum={payApp.contract_sum}
+              changeOrders={payApp.change_orders}
+              onSync={editable ? syncChangeOrders : null}
+              syncing={syncingCOs}
+            />
           </div>
         </div>
 
         <div className="section-header">
           <h3>Schedule of values (G703)</h3>
-          {editable && !showNewLine && (
-            <button className="btn-secondary btn-sm" onClick={() => setShowNewLine(true)}>
-              + Add line
-            </button>
-          )}
+          <div className="filter-bar">
+            <label className="filter-toggle" title="Hide lines with no activity this period">
+              <input
+                type="checkbox"
+                checked={showChangedOnly}
+                onChange={(e) => setShowChangedOnly(e.target.checked)}
+              />
+              <span>Changed this period only</span>
+            </label>
+            {editable && !showNewLine && (
+              <button className="btn-secondary btn-sm" onClick={() => setShowNewLine(true)}>
+                + Add line
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="g703-wrap">
@@ -549,39 +583,59 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
                   </td>
                 </tr>
               )}
-              {payApp.lines.map((l) => {
-                const completed = Number(l.completed_previous || 0) + Number(l.completed_this_period || 0) + Number(l.stored_materials || 0);
-                const sched = Number(l.scheduled_value || 0);
-                const pct = sched > 0 ? (completed / sched) * 100 : 0;
-                const toFinish = sched - completed;
-                return (
-                  <tr key={l.id}>
-                    <td>{l.description}</td>
-                    <td className="amount-cell">
-                      <InlineNum value={l.scheduled_value}
-                        onSave={(v) => updateLine(l.id, { scheduled_value: v })} />
-                    </td>
-                    <td className="amount-cell">
-                      <InlineNum value={l.completed_previous}
-                        onSave={(v) => updateLine(l.id, { completed_previous: v })} />
-                    </td>
-                    <td className="amount-cell">
-                      <InlineNum value={l.completed_this_period}
-                        onSave={(v) => updateLine(l.id, { completed_this_period: v })} />
-                    </td>
-                    <td className="amount-cell">
-                      <InlineNum value={l.stored_materials}
-                        onSave={(v) => updateLine(l.id, { stored_materials: v })} />
-                    </td>
-                    <td className="amount-cell strong">{fmtMoney(completed)}</td>
-                    <td className="amount-cell">{pct.toFixed(0)}%</td>
-                    <td className="amount-cell muted">{fmtMoney(toFinish)}</td>
-                    <td className="col-action">
-                      <button className="btn-icon" onClick={() => deleteLine(l.id)} title="Delete">×</button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {(() => {
+                const visible = showChangedOnly
+                  ? payApp.lines.filter((l) => Number(l.completed_this_period || 0) !== 0)
+                  : payApp.lines;
+                if (payApp.lines.length > 0 && visible.length === 0) {
+                  return (
+                    <tr>
+                      <td colSpan="9" className="muted center pad">
+                        No lines changed this period. Uncheck the filter to see all.
+                      </td>
+                    </tr>
+                  );
+                }
+                return visible.map((l) => {
+                  const completed = Number(l.completed_previous || 0) + Number(l.completed_this_period || 0) + Number(l.stored_materials || 0);
+                  const sched = Number(l.scheduled_value || 0);
+                  const pct = sched > 0 ? (completed / sched) * 100 : 0;
+                  const toFinish = sched - completed;
+                  return (
+                    <tr key={l.id}>
+                      <td>{l.description}</td>
+                      <td className="amount-cell">
+                        <InlineNum value={l.scheduled_value}
+                          onSave={(v) => updateLine(l.id, { scheduled_value: v })} />
+                      </td>
+                      <td className="amount-cell">
+                        <InlineNum value={l.completed_previous}
+                          onSave={(v) => updateLine(l.id, { completed_previous: v })} />
+                      </td>
+                      <td className="amount-cell">
+                        <InlineNum value={l.completed_this_period}
+                          onSave={(v) => updateLine(l.id, { completed_this_period: v })} />
+                      </td>
+                      <td className="amount-cell">
+                        <InlineNum value={l.stored_materials}
+                          onSave={(v) => updateLine(l.id, { stored_materials: v })} />
+                      </td>
+                      <td className="amount-cell strong">{fmtMoney(completed)}</td>
+                      <td className="amount-cell">
+                        <InlinePct
+                          pct={pct}
+                          line={l}
+                          onSave={(newThisPeriod) => updateLine(l.id, { completed_this_period: newThisPeriod })}
+                        />
+                      </td>
+                      <td className="amount-cell muted">{fmtMoney(toFinish)}</td>
+                      <td className="col-action">
+                        <button className="btn-icon" onClick={() => deleteLine(l.id)} title="Delete">×</button>
+                      </td>
+                    </tr>
+                  );
+                });
+              })()}
             </tbody>
             <tfoot>
               <tr>
@@ -735,6 +789,104 @@ function InlineNum({ value, onSave }) {
     <span className="inline-editable" onClick={() => { setDraft(String(value ?? 0)); setEditing(true); }}>
       {fmtMoney(value)}
     </span>
+  );
+}
+
+// Phase 2: click % to type a new target, and we back-solve the "this period" $
+// from that target (target% × scheduled − prior − stored). The point is to let
+// the user say "this line is at 75%" without doing the math themselves.
+function InlinePct({ pct, line, onSave }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(String(Math.round(pct)));
+  const [saving, setSaving] = useState(false);
+
+  if (editing) {
+    return (
+      <input
+        autoFocus
+        className="inline-input"
+        type="text"
+        style={{ width: 56, textAlign: 'right' }}
+        value={draft}
+        disabled={saving}
+        onChange={(e) => setDraft(e.target.value)}
+        onFocus={(e) => e.target.select()}
+        onBlur={async () => {
+          if (saving) return;
+          const stripped = String(draft).replace(/[%\s,]/g, '');
+          const parsed = Number(stripped);
+          if (Number.isNaN(parsed) || stripped === '') { setEditing(false); return; }
+          const target = Math.max(0, Math.min(100, parsed));
+          const sched = Number(line.scheduled_value || 0);
+          if (sched <= 0) { setEditing(false); return; }
+          const prior = Number(line.completed_previous || 0);
+          const stored = Number(line.stored_materials || 0);
+          // Required "this period" $ = target% of scheduled, minus what's already
+          // been counted as prior + stored. Floor at 0 so going backwards is a no-op.
+          const newThisPeriod = Math.max(0, Math.round(((target / 100) * sched - prior - stored) * 100) / 100);
+          const current = Number(line.completed_this_period || 0);
+          if (newThisPeriod === current) { setEditing(false); return; }
+          setSaving(true);
+          try { await onSave(newThisPeriod); setEditing(false); }
+          catch (e) { alert(e.message); }
+          finally { setSaving(false); }
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
+          if (e.key === 'Escape') { setDraft(String(Math.round(pct))); setEditing(false); }
+        }}
+      />
+    );
+  }
+  return (
+    <span
+      className="inline-editable"
+      title="Click to set a new % complete — the 'this period' $ will be back-calculated"
+      onClick={() => { setDraft(String(Math.round(pct))); setEditing(true); }}
+    >
+      {pct.toFixed(0)}%
+    </span>
+  );
+}
+
+// Phase 2: Original Contract Sum + Approved COs = Revised Contract Sum.
+// 🔄 button re-pulls the project's approved-CO total into this pay app.
+function ContractSumBlock({ contractSum, changeOrders, onSync, syncing }) {
+  const base = Number(contractSum || 0);
+  const cos = Number(changeOrders || 0);
+  const revised = base + cos;
+  return (
+    <div className="meta-item contract-sum-block">
+      <div className="label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span>Contract sum</span>
+        {onSync && (
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={onSync}
+            disabled={syncing}
+            title="Re-pull approved Change Orders from the project"
+            style={{ fontSize: 12, padding: '0 4px' }}
+          >
+            {syncing ? '…' : '🔄'}
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12, lineHeight: 1.3 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span className="muted">Original</span>
+          <span>{fmtMoney(base)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span className="muted">+ Approved COs</span>
+          <span>{fmtMoney(cos)}</span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, borderTop: '1px solid var(--border, #e5e7eb)', paddingTop: 2, marginTop: 2 }}>
+          <span className="strong">Revised</span>
+          <span className="strong">{fmtMoney(revised)}</span>
+        </div>
+      </div>
+    </div>
   );
 }
 

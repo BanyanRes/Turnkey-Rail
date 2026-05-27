@@ -481,6 +481,16 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
           <button className="btn-secondary btn-sm" onClick={onBack}>← Back to list</button>
         </div>
         <div className="filter-bar">
+          <a
+            href={api.payAppPdfUrl(payAppId)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="btn-secondary btn-sm"
+            title="Open AIA G702/G703-style PDF"
+            style={{ textDecoration: 'none' }}
+          >
+            📄 Export PDF
+          </a>
           {editable ? (
             <StatusChanger current={payApp.status} onChange={changeStatus} />
           ) : (

@@ -1,6 +1,7 @@
 // Pay applications + line items
 const express = require('express');
 const { getDb } = require('../db/database');
+const { renderPayAppPdf } = require('../lib/payAppPdf');
 
 const router = express.Router();
 
@@ -346,6 +347,62 @@ router.delete('/:id', (req, res) => {
   const result = db.prepare('DELETE FROM pay_applications WHERE id = ?').run(req.params.id);
   if (result.changes === 0) return res.status(404).json({ error: 'Pay application not found' });
   res.json({ ok: true, deleted: Number(req.params.id) });
+});
+
+// GET /api/pay-apps/:id/pdf — stream an AIA G702/G703-style PDF.
+// Query string ?download=1 forces an attachment download; otherwise opens inline.
+router.get('/:id/pdf', (req, res) => {
+  const db = getDb();
+  const header = db.prepare(`
+    SELECT
+      pa.*,
+      p.code AS project_code,
+      p.name AS project_name,
+      p.address AS project_address,
+      s.name AS subcontractor_name,
+      s.trade AS subcontractor_trade
+    FROM pay_applications pa
+    JOIN projects p ON p.id = pa.project_id
+    LEFT JOIN subcontractors s ON s.id = pa.subcontractor_id
+    WHERE pa.id = ?
+  `).get(req.params.id);
+  if (!header) return res.status(404).json({ error: 'Pay application not found' });
+
+  const payApp = withTotals(db, header);
+  const lines = db.prepare(`
+    SELECT * FROM pay_app_lines WHERE pay_app_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(req.params.id);
+
+  const project = {
+    code: header.project_code,
+    name: header.project_name,
+    address: header.project_address,
+  };
+  const vendor = header.subcontractor_id
+    ? { name: header.subcontractor_name, trade: header.subcontractor_trade }
+    : null;
+
+  const filename = [
+    'PayApp',
+    `${header.project_code}`,
+    vendor ? vendor.name.replace(/[^a-zA-Z0-9]+/g, '_') : 'Owner',
+    `${header.app_number}`,
+  ].join('_') + '.pdf';
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader(
+    'Content-Disposition',
+    `${req.query.download ? 'attachment' : 'inline'}; filename="${filename}"`
+  );
+
+  renderPayAppPdf(res, {
+    payApp,
+    lines,
+    project,
+    vendor,
+    issuerName: process.env.GC_NAME || 'Banyan Residential',
+  });
 });
 
 // ============================================================

@@ -77,6 +77,10 @@ export const api = {
     request(`/pay-apps/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
   deletePayApp: (id) =>
     request(`/pay-apps/${id}`, { method: 'DELETE' }),
+  // Returns a URL the browser can open/download to get the AIA G702/G703 PDF.
+  // download=true forces an attachment; otherwise the PDF opens inline.
+  payAppPdfUrl: (id, { download = false } = {}) =>
+    `/api/pay-apps/${id}/pdf${download ? '?download=1' : ''}`,
 
   // Pay app lines
   listPayAppLines: (payAppId) => request(`/pay-apps/${payAppId}/lines`),

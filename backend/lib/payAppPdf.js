@@ -72,7 +72,7 @@ function drawG702(doc, { payApp, project, vendor, issuerName }) {
 
   drawLabeledBox(doc, c1, y, colW, 70, recipientLabel, recipientName);
   drawLabeledBox(doc, c2, y, colW, 70, 'FROM',
-    fromName + (vendor ? '\n(General Contractor)' : '\n(General Contractor → Owner)'));
+    fromName + (vendor ? '\n(General Contractor)' : '\n(General Contractor to Owner)'));
   drawLabeledBox(doc, c3, y, colW, 70, 'PROJECT',
     `${project.code} — ${project.name}${project.address ? '\n' + project.address : ''}`);
   y += 80;
@@ -81,7 +81,7 @@ function drawG702(doc, { payApp, project, vendor, issuerName }) {
   const metaCols = 4;
   const metaW = pageWidth / metaCols;
   const periodText = (payApp.period_start && payApp.period_end)
-    ? `${payApp.period_start} → ${payApp.period_end}`
+    ? `${payApp.period_start} to ${payApp.period_end}`
     : (payApp.period_end || '—');
   drawLabeledBox(doc, c1 + 0 * metaW, y, metaW - 6, metaH, 'APPLICATION NO.', `#${payApp.app_number}`);
   drawLabeledBox(doc, c1 + 1 * metaW, y, metaW - 6, metaH, 'PERIOD', periodText);

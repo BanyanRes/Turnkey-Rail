@@ -74,6 +74,17 @@ function runMigrations(db) {
   if (liensAdded > 0) {
     console.log(`[db migrate] users.permissions.liens backfilled on ${liensAdded} row(s)`);
   }
+
+  // documents.pay_app_id — links a document to a specific pay app so the
+  // monthly close-out package can be one folder of receipts/photos/invoices.
+  // Nullable: documents can exist before any pay app is open (e.g. plans,
+  // permits) and are simply attached when a pay app is created later.
+  const docCols = db.prepare("PRAGMA table_info(documents)").all().map(c => c.name);
+  if (!docCols.includes('pay_app_id')) {
+    db.exec("ALTER TABLE documents ADD COLUMN pay_app_id INTEGER REFERENCES pay_applications(id) ON DELETE SET NULL");
+    db.exec("CREATE INDEX IF NOT EXISTS idx_docs_pay_app ON documents(pay_app_id)");
+    console.log('[db migrate] documents.pay_app_id added');
+  }
 }
 
 function getDb() {

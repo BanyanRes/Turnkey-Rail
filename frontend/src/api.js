@@ -139,10 +139,15 @@ export const api = {
     ).toString();
     return request(`/documents${q ? `?${q}` : ''}`);
   },
-  uploadDocument: async ({ file, project_id, category, notes }) => {
+  // Upload a file. pay_app_id options:
+  //   undefined  → server auto-attaches to the active Owner draft pay app (if any)
+  //   number     → explicit attach to that pay app
+  //   'none'     → opt out of auto-attach, leave the doc project-scoped only
+  uploadDocument: async ({ file, project_id, pay_app_id, category, notes }) => {
     const fd = new FormData();
     fd.append('file', file);
     if (project_id) fd.append('project_id', project_id);
+    if (pay_app_id != null) fd.append('pay_app_id', String(pay_app_id));
     if (category) fd.append('category', category);
     if (notes) fd.append('notes', notes);
     const res = await fetch('/api/documents', { method: 'POST', body: fd });

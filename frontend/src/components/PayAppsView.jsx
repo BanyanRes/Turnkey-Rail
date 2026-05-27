@@ -695,6 +695,12 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
 
         <LienWaiversSection payApp={payApp} editable={editable} />
 
+        <PayAppDocumentsSection
+          payAppId={payAppId}
+          projectId={payApp.project_id}
+          editable={editable}
+        />
+
         <SummaryPanel payApp={payApp} />
       </main>
 
@@ -1208,4 +1214,168 @@ function AlertsBanner({ alerts }) {
       </ul>
     </div>
   );
+}
+
+
+// Documents attached to this pay app. Uploads default to auto-attach (server
+// links new docs to the active Owner draft pay app for this project) — but
+// when uploading from the pay-app detail page we pin pay_app_id explicitly so
+// the doc lands HERE regardless of which Owner draft is active. Users can
+// detach without deleting via the unlink button.
+function PayAppDocumentsSection({ payAppId, projectId, editable }) {
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [uploading, setUploading] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await api.listDocuments({ pay_app_id: payAppId });
+      setDocs(data);
+      setError(null);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, [payAppId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      await api.uploadDocument({
+        file,
+        project_id: projectId,
+        pay_app_id: payAppId, // pin explicitly to this pay app
+      });
+      await load();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setUploading(false);
+      // Reset the input so re-uploading the same filename triggers onChange.
+      e.target.value = '';
+    }
+  }
+
+  async function detach(docId) {
+    if (!confirm('Detach this document from the pay app? The file stays in the project, just not linked here.')) return;
+    try {
+      await api.updateDocument(docId, { pay_app_id: 'none' });
+      await load();
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
+  async function remove(docId) {
+    if (!confirm('Delete this document permanently? This cannot be undone.')) return;
+    try {
+      await api.deleteDocument(docId);
+      await load();
+    } catch (e) {
+      alert(e.message);
+    }
+  }
+
+  return (
+    <div className="section">
+      <div className="section-header">
+        <h3>Attached documents</h3>
+        {editable && (
+          <label className="btn-secondary btn-sm" style={{ cursor: uploading ? 'wait' : 'pointer' }}>
+            {uploading ? 'Uploading…' : '📎 Attach file'}
+            <input
+              type="file"
+              style={{ display: 'none' }}
+              onChange={handleUpload}
+              disabled={uploading}
+            />
+          </label>
+        )}
+      </div>
+      {error && <div className="error">{error}</div>}
+      {loading ? (
+        <div className="muted">Loading…</div>
+      ) : docs.length === 0 ? (
+        <div className="muted" style={{ padding: '12px 0' }}>
+          No documents attached. Upload receipts, photos, or invoices and they’ll travel with this pay app.
+        </div>
+      ) : (
+        <table className="vendors-table">
+          <thead>
+            <tr>
+              <th>Filename</th>
+              <th>Category</th>
+              <th>Size</th>
+              <th>Uploaded</th>
+              <th style={{ width: 160 }}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {docs.map((d) => (
+              <tr key={d.id}>
+                <td>
+                  <a
+                    href={api.documentUrl(d.id)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    {d.filename}
+                  </a>
+                </td>
+                <td className="muted">{d.category || '—'}</td>
+                <td className="muted">{formatBytes(d.size_bytes)}</td>
+                <td className="muted">{d.created_at?.slice(0, 10) || '—'}</td>
+                <td className="col-action" style={{ textAlign: 'right' }}>
+                  <a
+                    href={api.documentUrl(d.id, { download: true })}
+                    className="btn-icon"
+                    title="Download"
+                    style={{ marginRight: 4 }}
+                  >
+                    ⬇
+                  </a>
+                  {editable && (
+                    <>
+                      <button
+                        className="btn-icon"
+                        onClick={() => detach(d.id)}
+                        title="Detach from pay app (keep in project)"
+                        style={{ marginRight: 4 }}
+                      >
+                        🔗
+                      </button>
+                      <button
+                        className="btn-icon"
+                        onClick={() => remove(d.id)}
+                        title="Delete permanently"
+                      >
+                        ×
+                      </button>
+                    </>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
+  );
+}
+
+// Format bytes as a human-friendly string. Used by the docs table.
+function formatBytes(n) {
+  if (n == null || n === 0) return '—';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  let v = Number(n);
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
 }

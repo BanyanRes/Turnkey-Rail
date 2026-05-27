@@ -121,6 +121,7 @@ CREATE INDEX IF NOT EXISTS idx_cos_status ON change_orders(status);
 CREATE TABLE IF NOT EXISTS documents (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   project_id    INTEGER REFERENCES projects(id) ON DELETE CASCADE,
+  pay_app_id    INTEGER REFERENCES pay_applications(id) ON DELETE SET NULL,
   category      TEXT,                              -- plans | contract | permit | photo | invoice | other
   filename      TEXT    NOT NULL,                  -- original filename
   stored_path   TEXT    NOT NULL,                  -- relative path under data/files/

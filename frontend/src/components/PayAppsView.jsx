@@ -428,12 +428,23 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
   const [syncingCOs, setSyncingCOs] = useState(false);
   // #9 SoV import modal.
   const [showImport, setShowImport] = useState(false);
+  // #12 Variance alerts. We refetch these whenever the pay app is reloaded
+  // so the banner reflects the latest edits without the user refreshing.
+  const [alerts, setAlerts] = useState([]);
 
   const load = useCallback(async () => {
     try {
       const data = await api.getPayApp(payAppId);
       setPayApp(data);
       setError(null);
+      // Alerts are non-blocking — if the call fails, we just don't show a
+      // banner. Don't make the whole page error out on a flaky alerts response.
+      try {
+        const result = await api.getPayAppAlerts(payAppId);
+        setAlerts(result.alerts || []);
+      } catch {
+        setAlerts([]);
+      }
     } catch (e) {
       setError(e.message);
     } finally {
@@ -565,6 +576,8 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
             />
           </div>
         </div>
+
+        <AlertsBanner alerts={alerts} />
 
         <div className="section-header">
           <h3>Schedule of values (G703)</h3>
@@ -1130,6 +1143,69 @@ function ImportSovModal({ payAppId, hasExistingLines, onClose, onImported }) {
           </button>
         </div>
       </form>
+    </div>
+  );
+}
+
+// Variance / alert banner. Shows above the SoV table when the alerts endpoint
+// returns anything. Empty list → render nothing (no banner clutter on clean
+// pay apps). Errors get red, warnings get amber. The visual emphasis here is
+// deliberate: this is the user's "are you sure?" check before submitting.
+function AlertsBanner({ alerts }) {
+  if (!alerts || alerts.length === 0) return null;
+  const errors = alerts.filter((a) => a.severity === 'error');
+  const warnings = alerts.filter((a) => a.severity === 'warning');
+  const hasErrors = errors.length > 0;
+
+  // Pick the dominant accent — errors win over warnings, since we want the
+  // strongest visual signal when there's a real over-budget condition.
+  const accent = hasErrors
+    ? { border: '#ef4444', bg: '#fef2f2', label: '#991b1b' }
+    : { border: '#f59e0b', bg: '#fffbeb', label: '#92400e' };
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${accent.border}`,
+        background: accent.bg,
+        borderRadius: 8,
+        padding: '12px 14px',
+        marginBottom: 16,
+      }}
+    >
+      <div
+        style={{
+          fontSize: 13,
+          fontWeight: 600,
+          color: accent.label,
+          marginBottom: 8,
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+        }}
+      >
+        {hasErrors ? '⚠ Review before submitting' : '⚠ Worth a glance'}
+        <span className="muted" style={{ marginLeft: 8, fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>
+          {errors.length > 0 && `${errors.length} error${errors.length === 1 ? '' : 's'}`}
+          {errors.length > 0 && warnings.length > 0 && ', '}
+          {warnings.length > 0 && `${warnings.length} warning${warnings.length === 1 ? '' : 's'}`}
+        </span>
+      </div>
+      <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.5 }}>
+        {alerts.map((a, i) => (
+          <li
+            key={i}
+            style={{
+              color: a.severity === 'error' ? '#991b1b' : '#92400e',
+              marginBottom: i < alerts.length - 1 ? 4 : 0,
+            }}
+          >
+            <span style={{ fontWeight: 600, marginRight: 6 }}>
+              {a.severity === 'error' ? '●' : '○'}
+            </span>
+            {a.message}
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

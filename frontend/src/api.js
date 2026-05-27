@@ -104,6 +104,9 @@ export const api = {
     if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
     return data;
   },
+  // Variance / anomaly alerts for a pay app (over-budget lines, big jumps,
+  // sub overbilled vs contract, project margin negative). Read-only.
+  getPayAppAlerts: (id) => request(`/pay-apps/${id}/alerts`),
 
   // Pay app lines
   listPayAppLines: (payAppId) => request(`/pay-apps/${payAppId}/lines`),

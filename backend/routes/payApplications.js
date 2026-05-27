@@ -507,6 +507,155 @@ router.post('/:id/lines', (req, res) => {
 });
 
 // ============================================================
+// ALERTS — pay app variance / anomaly checks
+// ============================================================
+//
+// The point: at month-end the user is reviewing a pay app and wants the system
+// to flag anything unusual without having to eyeball every line. This endpoint
+// is read-only and idempotent — it derives alerts on the fly from the current
+// pay app + project state, so there's no separate "dismiss alert" workflow to
+// build yet (would be a v2 feature with a small alerts table).
+//
+// Severity:
+//   - error: the user should look before submitting/approving (over-budget, sub
+//     billing beyond contract). Real money implications.
+//   - warning: worth a glance but might be intentional (large jump from prior,
+//     project-level margin negative).
+//
+// Each alert has { severity, code, message, line_id? }. Codes are stable so the
+// UI can decide which to style differently later.
+router.get('/:id/alerts', (req, res) => {
+  const db = getDb();
+  const header = db.prepare(`
+    SELECT pa.*, p.code AS project_code, p.name AS project_name
+    FROM pay_applications pa
+    JOIN projects p ON p.id = pa.project_id
+    WHERE pa.id = ?
+  `).get(req.params.id);
+  if (!header) return res.status(404).json({ error: 'Pay application not found' });
+
+  const lines = db.prepare(`
+    SELECT * FROM pay_app_lines WHERE pay_app_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(req.params.id);
+
+  const alerts = [];
+
+  // --- Line-level checks ---
+  for (const l of lines) {
+    const sched = Number(l.scheduled_value || 0);
+    const prior = Number(l.completed_previous || 0);
+    const thisPeriod = Number(l.completed_this_period || 0);
+    const stored = Number(l.stored_materials || 0);
+    const completed = prior + thisPeriod + stored;
+
+    // Over-budget: completed > scheduled. Skip lines with sched=0 (those are
+    // typically placeholder rows with no budget set yet).
+    if (sched > 0 && completed > sched) {
+      const overBy = completed - sched;
+      alerts.push({
+        severity: 'error',
+        code: 'line_over_budget',
+        message: `"${l.description}" is over its scheduled value by ${fmtForAlert(overBy)} (completed ${fmtForAlert(completed)} vs scheduled ${fmtForAlert(sched)}).`,
+        line_id: l.id,
+      });
+    }
+
+    // Big this-period jump: this_period > 50% of scheduled. This is the GC's
+    // "are you sure?" check — a single month claiming half the line's budget
+    // is unusual enough to warrant a glance.
+    if (sched > 0 && thisPeriod > 0.5 * sched) {
+      const pctOfSched = Math.round((thisPeriod / sched) * 100);
+      alerts.push({
+        severity: 'warning',
+        code: 'line_big_jump',
+        message: `"${l.description}" billed ${pctOfSched}% of the line's scheduled value in this period alone (${fmtForAlert(thisPeriod)} of ${fmtForAlert(sched)}). Verify the work was completed this period.`,
+        line_id: l.id,
+      });
+    }
+  }
+
+  // --- Pay-app-level: sub side billing past revised contract ---
+  // Only meaningful on the sub side. Owner side doesn't have the same
+  // cap-against-contract semantics here (contract_sum on Owner pay apps is
+  // typically 0 — owner billings get capped against project.revised_contract,
+  // which we cover in the project-level check below).
+  if (header.subcontractor_id != null) {
+    // Cumulative earned-less-retainage for this sub on this project, summed
+    // across every pay app (including this one) so we catch overbilling on the
+    // PREVIOUS pay app surfacing this month.
+    const subTotals = db.prepare(`
+      SELECT
+        COALESCE(SUM(
+          (SELECT SUM(completed_previous + completed_this_period + stored_materials)
+           FROM pay_app_lines WHERE pay_app_id = pa.id)
+          * (1 - COALESCE(pa.retainage_pct, 0) / 100.0)
+        ), 0) AS billed_cumulative
+      FROM pay_applications pa
+      WHERE pa.project_id = ? AND pa.subcontractor_id = ?
+    `).get(header.project_id, header.subcontractor_id);
+    const revised = Number(header.contract_sum || 0) + Number(header.change_orders || 0);
+    const billed = Number(subTotals?.billed_cumulative || 0);
+    if (revised > 0 && billed > revised) {
+      const overBy = billed - revised;
+      alerts.push({
+        severity: 'error',
+        code: 'sub_billed_over_contract',
+        message: `Sub has billed ${fmtForAlert(billed)} cumulative on this project — ${fmtForAlert(overBy)} over the revised contract (${fmtForAlert(revised)}). Check for a missing approved change order.`,
+      });
+    }
+  }
+
+  // --- Project-level: cumulative margin negative ---
+  // Mirrors the reconciliation endpoint's math. Owner billings minus sub
+  // billings, both net of retainage. If subs are billing faster than owner is
+  // being invoiced, that's a real cash-flow concern.
+  const projectTotals = db.prepare(`
+    SELECT
+      pa.subcontractor_id IS NULL AS is_owner,
+      COALESCE(SUM(
+        (SELECT SUM(completed_previous + completed_this_period + stored_materials)
+         FROM pay_app_lines WHERE pay_app_id = pa.id)
+        * (1 - COALESCE(pa.retainage_pct, 0) / 100.0)
+      ), 0) AS billed_cumulative
+    FROM pay_applications pa
+    WHERE pa.project_id = ?
+    GROUP BY is_owner
+  `).all(header.project_id);
+  let ownerBilled = 0;
+  let subBilled = 0;
+  for (const row of projectTotals) {
+    if (row.is_owner) ownerBilled = Number(row.billed_cumulative || 0);
+    else subBilled = Number(row.billed_cumulative || 0);
+  }
+  if (subBilled > ownerBilled && subBilled > 0) {
+    const gap = subBilled - ownerBilled;
+    alerts.push({
+      severity: 'warning',
+      code: 'project_margin_negative',
+      message: `Project has billed subs ${fmtForAlert(subBilled)} cumulative but only ${fmtForAlert(ownerBilled)} to the owner — gap of ${fmtForAlert(gap)}. Owner-side billing may be behind.`,
+    });
+  }
+
+  res.json({
+    pay_app_id: header.id,
+    project_id: header.project_id,
+    alerts,
+    counts: {
+      error: alerts.filter((a) => a.severity === 'error').length,
+      warning: alerts.filter((a) => a.severity === 'warning').length,
+    },
+  });
+});
+
+// Tiny money formatter for alert messages. Server-side because alerts are
+// rendered straight to the user without going through fmtMoney in the UI.
+function fmtForAlert(n) {
+  const v = Math.round(Number(n) || 0);
+  return '$' + v.toLocaleString('en-US');
+}
+
+// ============================================================
 // SOV EXCEL IMPORT / EXPORT
 // ============================================================
 //

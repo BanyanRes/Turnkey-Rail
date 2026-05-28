@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { api } from './api';
+import { api, setOn401Handler } from './api';
 import ProjectsView from './components/ProjectsView';
 import VendorsView from './components/VendorsView';
 import PayAppsView from './components/PayAppsView';
@@ -9,6 +9,7 @@ import ScheduleView from './components/ScheduleView';
 import LiensView from './components/LiensView';
 import AdminView from './components/AdminView';
 import InviteAcceptView from './components/InviteAcceptView';
+import LoginView from './components/LoginView';
 import { canView } from './permissions';
 import './App.css';
 
@@ -43,10 +44,62 @@ export default function App() {
 function MainApp() {
   const [tab, setTab] = useState('projects');
   const [me, setMe] = useState(null);
+  // phase: 'loading' (initial /api/me probe) | 'login' (show LoginView) | 'main'
+  const [phase, setPhase] = useState('loading');
 
+  // Initial auth probe. On 401, fall through to login. On success, go straight
+  // to the main app. (`me` may already be the dev-mode anonymous user if the
+  // server has no users configured; that still counts as authenticated.)
   useEffect(() => {
-    api.getMe().then(setMe).catch(() => setMe(null));
+    let cancelled = false;
+    (async () => {
+      try {
+        const user = await api.getMe();
+        if (cancelled) return;
+        setMe(user);
+        setPhase('main');
+      } catch (e) {
+        if (cancelled) return;
+        // 401 → not signed in; anything else → still show login so user can retry
+        setMe(null);
+        setPhase('login');
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
+
+  // If a later API call returns 401, the session expired mid-use — bounce
+  // back to the login screen. api.js calls this through setOn401Handler.
+  useEffect(() => {
+    setOn401Handler(() => {
+      setMe(null);
+      setPhase('login');
+    });
+    return () => setOn401Handler(null);
+  }, []);
+
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } catch {
+      // Even if the network call fails, clear local state and show login.
+    }
+    setMe(null);
+    setPhase('login');
+  }
+
+  function handleLoggedIn(user) {
+    setMe(user);
+    setPhase('main');
+  }
+
+  if (phase === 'loading') {
+    return <div className="app-loading">Loading…</div>;
+  }
+
+  if (phase === 'login') {
+    return <LoginView onLoggedIn={handleLoggedIn} />;
+  }
 
   // Filter tabs to ones the user can actually view (env-admin sees all).
   // Defaults to all tabs while `me` is still loading to avoid an empty nav flash.
@@ -77,8 +130,18 @@ function MainApp() {
         </div>
         {me && (
           <div className="signed-in-as muted">
-            {me.username}
+            <span>{me.username}</span>
             {me.is_admin && <span className="badge badge-admin">admin</span>}
+            {me.source !== 'none' && (
+              <button
+                type="button"
+                className="logout-btn"
+                onClick={handleLogout}
+                title="Sign out"
+              >
+                Sign out
+              </button>
+            )}
           </div>
         )}
       </header>

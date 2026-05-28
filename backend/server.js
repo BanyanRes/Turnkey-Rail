@@ -7,9 +7,11 @@ const express = require('express');
 const cors = require('cors');
 const morgan = require('morgan');
 const bcrypt = require('bcryptjs');
+const cookieParser = require('cookie-parser');
 
 const { initDb, getDb } = require('./db/database');
 const perms = require('./lib/permissions');
+const sessionAuth = require('./lib/sessionAuth');
 
 const app = express();
 const PORT = process.env.PORT || 4000;
@@ -23,13 +25,18 @@ const HAS_DIST = fs.existsSync(DIST_DIR);
 // Initialize DB (creates file + runs schema if needed)
 initDb();
 
-// ===== Basic Auth =====
+// ===== Authentication =====
 //
-// TWO sources of users:
+// Strategy: cookie-based session via HMAC-signed tokens (no DB session table).
+// Login flow: POST /api/login with { username, password, rememberMe } → sets
+// httpOnly session cookie. Logout: POST /api/logout clears it. All other API
+// routes verify the cookie and populate req.user.
+//
+// TWO sources of users (unchanged from previous Basic Auth):
 //  (a) Env-var "root" users — set via BASIC_AUTH_USERS or BASIC_AUTH_USER+PASS.
-//      These are always admin and cannot be removed via the UI. Use them
-//      to bootstrap or recover from lockout.
-//  (b) DB users — managed through the /api/users admin endpoints (see routes/users.js).
+//      Always admin. Used to bootstrap or recover from lockout.
+//      (Env var names kept for backwards compat; they apply to login too.)
+//  (b) DB users — managed through /api/users admin endpoints.
 //      Stored with bcrypt-hashed passwords, can be admin or non-admin.
 //
 // Auth bypass: if NEITHER source has any users, the app runs wide open
@@ -59,31 +66,101 @@ if (ENV_USERS.size > 0) {
   console.log(`[auth] ${ENV_USERS.size} env-var (root) user(s) loaded`);
 }
 
-function unauthorized(res) {
-  res.set('WWW-Authenticate', 'Basic realm="Turnkey Rail", charset="UTF-8"');
-  return res.status(401).send('Authentication required');
+/**
+ * Look up a user by username/password against env users and DB users.
+ * Returns the populated req.user object on success, or null on failure.
+ */
+async function authenticateCredentials(username, password) {
+  if (!username || !password) return null;
+
+  // 1) Env-var users — always admin (root), full permissions on everything
+  if (ENV_USERS.get(username) === password) {
+    return {
+      username,
+      is_admin: true,
+      source: 'env',
+      permissions: perms.envUserPermissions(),
+    };
+  }
+
+  // 2) DB users — bcrypt-compared, permissions parsed from JSON column
+  const db = getDb();
+  const dbUser = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
+  if (dbUser) {
+    const ok = await bcrypt.compare(password, dbUser.password_hash);
+    if (ok) {
+      return {
+        username: dbUser.username,
+        is_admin: !!dbUser.is_admin,
+        source: 'db',
+        id: dbUser.id,
+        email: dbUser.email || null,
+        permissions: perms.parse(dbUser.permissions),
+      };
+    }
+  }
+
+  return null;
 }
 
-async function basicAuth(req, res, next) {
-  // Public bypass: invitation-acceptance routes have no auth — the user signing
-  // up doesn't have creds yet. Server.js controls this rather than the router
-  // because app.use(basicAuth) is global.
-  if (req.path.startsWith('/api/invitations/token/')) {
-    return next();
+/**
+ * Rebuild req.user from a verified session token's payload.
+ * Re-reads the DB each request so permission changes take effect immediately
+ * (no need to log users out when their permissions are updated).
+ */
+function rehydrateUser(payload) {
+  if (!payload || !payload.u) return null;
+
+  if (payload.src === 'env') {
+    // Env users still need to exist in ENV_USERS, else their session is stale
+    if (!ENV_USERS.has(payload.u)) return null;
+    return {
+      username: payload.u,
+      is_admin: true,
+      source: 'env',
+      permissions: perms.envUserPermissions(),
+    };
   }
 
-  // Public bypass: anything that isn't an API call is the React SPA bundle
-  // (HTML, JS, CSS, /invite/<token> SPA route, etc). Static assets don't need
-  // auth — the API does. The browser will still get prompted on the first
-  // /api/me call, so the practical UX is unchanged for normal sign-in.
-  if (!req.path.startsWith('/api')) {
-    return next();
+  if (payload.src === 'db') {
+    const db = getDb();
+    const dbUser = db.prepare('SELECT * FROM users WHERE username = ?').get(payload.u);
+    if (!dbUser) return null;
+    return {
+      username: dbUser.username,
+      is_admin: !!dbUser.is_admin,
+      source: 'db',
+      id: dbUser.id,
+      email: dbUser.email || null,
+      permissions: perms.parse(dbUser.permissions),
+    };
   }
+
+  return null;
+}
+
+/**
+ * Express middleware: verify session cookie, populate req.user, or 401.
+ * Public routes (invitation acceptance, non-API SPA assets, /api/login,
+ * /api/health) are exempt.
+ */
+function cookieAuth(req, res, next) {
+  // Public: invitation acceptance (user has no creds yet)
+  if (req.path.startsWith('/api/invitations/token/')) return next();
+
+  // Public: login & logout themselves
+  if (req.path === '/api/login' || req.path === '/api/logout') return next();
+
+  // Public: health check
+  if (req.path === '/api/health') return next();
+
+  // Public: anything outside /api is the React SPA bundle (HTML/JS/CSS)
+  if (!req.path.startsWith('/api')) return next();
 
   const db = getDb();
   const dbHasUsers = db.prepare('SELECT 1 FROM users LIMIT 1').get();
 
-  // Dev mode: no users anywhere -> bypass auth, pretend you're a dev admin.
+  // Dev mode: no users anywhere -> bypass auth
   if (ENV_USERS.size === 0 && !dbHasUsers) {
     req.user = {
       username: 'dev',
@@ -94,64 +171,68 @@ async function basicAuth(req, res, next) {
     return next();
   }
 
-  const header = req.headers.authorization || '';
-  if (!header.startsWith('Basic ')) return unauthorized(res);
-
-  let decoded;
-  try {
-    decoded = Buffer.from(header.slice(6), 'base64').toString('utf8');
-  } catch {
-    return unauthorized(res);
-  }
-  const idx = decoded.indexOf(':');
-  if (idx <= 0) return unauthorized(res);
-  const u = decoded.slice(0, idx);
-  const p = decoded.slice(idx + 1);
-
-  // 1) Env-var users — always admin (root), full permissions on everything
-  if (ENV_USERS.get(u) === p) {
-    req.user = {
-      username: u,
-      is_admin: true,
-      source: 'env',
-      permissions: perms.envUserPermissions(),
-    };
-    return next();
+  // Verify session cookie
+  const token = req.cookies && req.cookies[sessionAuth.COOKIE_NAME];
+  const payload = sessionAuth.verifyToken(token);
+  if (!payload) {
+    return res.status(401).json({ error: 'Authentication required' });
   }
 
-  // 2) DB users — bcrypt-compared, permissions parsed from JSON column
-  const dbUser = db.prepare('SELECT * FROM users WHERE username = ?').get(u);
-  if (dbUser) {
-    const ok = await bcrypt.compare(p, dbUser.password_hash);
-    if (ok) {
-      req.user = {
-        username: dbUser.username,
-        is_admin: !!dbUser.is_admin,
-        source: 'db',
-        id: dbUser.id,
-        email: dbUser.email || null,
-        permissions: perms.parse(dbUser.permissions),
-      };
-      return next();
-    }
+  const user = rehydrateUser(payload);
+  if (!user) {
+    // Session was valid but the underlying user is gone or env entry removed.
+    sessionAuth.clearSessionCookie(req, res);
+    return res.status(401).json({ error: 'Session invalid' });
   }
 
-  return unauthorized(res);
+  req.user = user;
+  return next();
 }
 
-// Admin gate, now driven by permissions.admin === 'full' (set by basicAuth above).
+// Admin gate, now driven by permissions.admin === 'full' (set by cookieAuth above).
 const requireAdmin = perms.requireAdmin;
 
 // ===== Middleware =====
 app.use(cors({ origin: CORS_ORIGIN, credentials: true }));
 app.use(express.json({ limit: '10mb' }));
+app.use(cookieParser());
 app.use(morgan('dev'));
-// basicAuth runs BEFORE all routes so req.user is always populated
-app.use(basicAuth);
+// cookieAuth runs BEFORE all routes so req.user is always populated (except on public routes)
+app.use(cookieAuth);
 
 // ===== Health =====
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true, service: 'Turnkey Rail API', time: new Date().toISOString() });
+});
+
+// ===== Authentication endpoints =====
+//
+// POST /api/login   { username, password, rememberMe } -> sets session cookie
+// POST /api/logout                                     -> clears session cookie
+// GET  /api/me                                         -> current user (via cookie)
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password, rememberMe } = req.body || {};
+    const user = await authenticateCredentials(username, password);
+    if (!user) {
+      // Generic message — don't reveal whether user exists.
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    const { token, maxAgeSec } = sessionAuth.createToken(
+      { u: user.username, src: user.source },
+      !!rememberMe
+    );
+    sessionAuth.setSessionCookie(req, res, token, maxAgeSec);
+    return res.json({ user });
+  } catch (err) {
+    console.error('[login]', err);
+    return res.status(500).json({ error: 'Login failed' });
+  }
+});
+
+app.post('/api/logout', (req, res) => {
+  sessionAuth.clearSessionCookie(req, res);
+  return res.json({ ok: true });
 });
 
 // ===== Current user =====

@@ -1,14 +1,29 @@
 // Tiny fetch wrapper. All requests are JSON in/out.
 const BASE = '/api';
 
+// Optional 401 handler — App.jsx registers this on mount so we can redirect
+// to the login screen when a session expires mid-use.
+let on401Handler = null;
+export function setOn401Handler(fn) {
+  on401Handler = fn;
+}
+
 async function request(path, options = {}) {
   const res = await fetch(`${BASE}${path}`, {
     headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    credentials: 'include', // send/receive session cookie
     ...options,
   });
   let data = null;
   try { data = await res.json(); } catch { /* no body */ }
   if (!res.ok) {
+    if (res.status === 401 && on401Handler) {
+      // Don't trigger the redirect for the login call itself — it's expected
+      // to return 401 on bad credentials and the caller handles that.
+      if (path !== '/login') {
+        on401Handler();
+      }
+    }
     const msg = (data && data.error) || `HTTP ${res.status}`;
     throw new Error(msg);
   }
@@ -98,6 +113,7 @@ export const api = {
     const res = await fetch(`/api/pay-apps/${id}/sov-import?mode=${mode}`, {
       method: 'POST',
       body: fd,
+      credentials: 'include',
     });
     let data = null;
     try { data = await res.json(); } catch {}
@@ -150,7 +166,7 @@ export const api = {
     if (pay_app_id != null) fd.append('pay_app_id', String(pay_app_id));
     if (category) fd.append('category', category);
     if (notes) fd.append('notes', notes);
-    const res = await fetch('/api/documents', { method: 'POST', body: fd });
+    const res = await fetch('/api/documents', { method: 'POST', body: fd, credentials: 'include' });
     let data = null;
     try { data = await res.json(); } catch {}
     if (!res.ok) throw new Error((data && data.error) || `HTTP ${res.status}`);
@@ -190,6 +206,14 @@ export const api = {
 
   // Current user
   getMe: () => request('/me'),
+
+  // Authentication
+  login: ({ username, password, rememberMe }) =>
+    request('/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password, rememberMe }),
+    }),
+  logout: () => request('/logout', { method: 'POST' }),
 
   // Users (admin only)
   listUsers: () => request('/users'),

@@ -1321,3 +1321,83 @@
   border-radius: 4px;
   white-space: nowrap;
 }
+
+/* ===== Login view ===== */
+.app-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.login-remember {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 8px;
+  font-size: 14px;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+.login-remember input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.login-error {
+  margin: 10px 0 4px;
+  padding: 8px 12px;
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+  border-radius: 6px;
+  font-size: 13px;
+}
+
+.login-submit {
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 16px;
+  background: #4338ca;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.login-submit:hover:not(:disabled) {
+  background: #3730a3;
+}
+.login-submit:disabled {
+  background: #9ca3af;
+  cursor: not-allowed;
+}
+
+/* ===== Sign out button in header ===== */
+.logout-btn {
+  margin-left: 12px;
+  padding: 4px 10px;
+  background: transparent;
+  color: inherit;
+  border: 1px solid #d1d5db;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s;
+}
+.logout-btn:hover {
+  background: #f3f4f6;
+  border-color: #9ca3af;
+}
+.signed-in-as {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}

@@ -1401,3 +1401,87 @@
   align-items: center;
   gap: 6px;
 }
+
+/* ===== Forgot password link & dialog ===== */
+.login-forgot-row {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.login-forgot-link {
+  background: transparent;
+  border: none;
+  color: #4338ca;
+  font-size: 13px;
+  cursor: pointer;
+  padding: 4px 8px;
+  text-decoration: underline;
+}
+.login-forgot-link:hover {
+  color: #3730a3;
+}
+
+.forgot-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 1000;
+}
+
+.forgot-card {
+  background: white;
+  border-radius: 10px;
+  padding: 24px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+}
+.forgot-card h2 {
+  margin: 0 0 12px;
+  font-size: 18px;
+  color: #111827;
+}
+.forgot-card p {
+  margin: 0 0 18px;
+  font-size: 14px;
+  color: #374151;
+  line-height: 1.5;
+}
+.forgot-card a {
+  color: #4338ca;
+  text-decoration: underline;
+}
+
+.forgot-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.forgot-email-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  text-align: center;
+}
+.forgot-email-btn:hover {
+  text-decoration: none;
+  color: white;
+}
+.forgot-close-btn {
+  padding: 8px 16px;
+  background: transparent;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  color: #374151;
+  font-size: 14px;
+  cursor: pointer;
+}
+.forgot-close-btn:hover {
+  background: #f3f4f6;
+}

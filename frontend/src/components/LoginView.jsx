@@ -14,6 +14,7 @@ export default function LoginView({ onLoggedIn }) {
   const [rememberMe, setRememberMe] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState(null);
+  const [showForgot, setShowForgot] = useState(false);
 
   const usernameRef = useRef(null);
   useEffect(() => {
@@ -95,7 +96,57 @@ export default function LoginView({ onLoggedIn }) {
           <button type="submit" className="login-submit" disabled={busy}>
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
+
+          <div className="login-forgot-row">
+            <button
+              type="button"
+              className="login-forgot-link"
+              onClick={() => setShowForgot(true)}
+            >
+              Forgot password?
+            </button>
+          </div>
         </form>
+
+        {showForgot && (
+          <ForgotPasswordDialog onClose={() => setShowForgot(false)} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Password reset is admin-mediated — there's no email infrastructure on the
+ * server, so users contact an admin who resets the password via /api/users.
+ * (See AdminView -> Users section.)
+ */
+function ForgotPasswordDialog({ onClose }) {
+  const adminEmail = 'jyun@banyanres.com';
+  const subject = encodeURIComponent('Turnkey Rail — password reset request');
+  const body = encodeURIComponent(
+    'Hi,\n\nI need my Turnkey Rail password reset.\n\n' +
+    'Username: \n\nThanks.'
+  );
+  const mailto = `mailto:${adminEmail}?subject=${subject}&body=${body}`;
+
+  return (
+    <div className="forgot-overlay" role="dialog" aria-modal="true">
+      <div className="forgot-card">
+        <h2>Forgot your password?</h2>
+        <p>
+          Password resets are handled by your administrator. Email{' '}
+          <a href={`mailto:${adminEmail}`}>{adminEmail}</a> with your username
+          and they'll send you a new one.
+        </p>
+        <div className="forgot-actions">
+          <a href={mailto} className="login-submit forgot-email-btn">
+            Email administrator
+          </a>
+          <button type="button" className="forgot-close-btn" onClick={onClose}>
+            Close
+          </button>
+        </div>
       </div>
     </div>
   );

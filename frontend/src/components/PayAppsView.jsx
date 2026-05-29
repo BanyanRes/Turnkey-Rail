@@ -476,6 +476,19 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
     await load();
   }
 
+  async function resyncCloudLedger() {
+    if (!payApp) return;
+    try {
+      const r = await api.fetch('/api/pay-apps/' + payApp.id + '/cloudledger/resync', { method: 'POST' });
+      setPayApp((prev) => prev ? ({ ...prev,
+        cloudledger_je_approved_id: r.cloudledger_je_approved_id,
+        cloudledger_je_paid_id: r.cloudledger_je_paid_id,
+      }) : prev);
+    } catch (e) {
+      alert('CloudLedger resync failed: ' + e.message);
+    }
+  }
+
   async function updateHeader(patch) {
     await api.updatePayApp(payAppId, patch);
     await load();
@@ -574,6 +587,14 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
               onSync={editable ? syncChangeOrders : null}
               syncing={syncingCOs}
             />
+            {payApp.subcontractor_id ? (
+              <PaymentMethodEdit
+                value={payApp.payment_method}
+                onSave={(v) => updateHeader({ payment_method: v })}
+                editable={editable}
+              />
+            ) : null}
+            <CloudLedgerInfo payApp={payApp} editable={editable} onResync={resyncCloudLedger} />
           </div>
         </div>
 
@@ -964,6 +985,63 @@ function InlinePct({ pct, line, onSave }) {
 
 // Phase 2: Original Contract Sum + Approved COs = Revised Contract Sum.
 // 🔄 button re-pulls the project's approved-CO total into this pay app.
+function PaymentMethodEdit({ value, onSave, editable }) {
+  const opts = [
+    { v: '',          label: '(not set)' },
+    { v: 'wire',      label: 'Wire transfer' },
+    { v: 'ach',       label: 'ACH' },
+    { v: 'check',     label: 'Check' },
+    { v: 'bill_com',  label: 'Bill.com' },
+  ];
+  if (!editable) {
+    const found = opts.find((o) => o.v === (value || ''));
+    return (
+      <div className="meta-block">
+        <div className="muted">Payment method</div>
+        <div className="strong">{found ? found.label : '—'}</div>
+      </div>
+    );
+  }
+  return (
+    <div className="meta-block">
+      <div className="muted">Payment method</div>
+      <select
+        value={value || ''}
+        onChange={(e) => onSave(e.target.value || null)}
+        className="meta-select"
+      >
+        {opts.map((o) => <option key={o.v} value={o.v}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
+function CloudLedgerInfo({ payApp, editable, onResync }) {
+  const a = payApp.cloudledger_je_approved_id;
+  const p = payApp.cloudledger_je_paid_id;
+  if (!a && !p) {
+    if (!editable) return null;
+    return (
+      <div className="meta-block">
+        <div className="muted">CloudLedger</div>
+        <button className="btn-sm" onClick={onResync} title="Push current status to CloudLedger">Sync now</button>
+      </div>
+    );
+  }
+  return (
+    <div className="meta-block">
+      <div className="muted">CloudLedger JE</div>
+      <div className="strong">
+        {a ? <span title="JE for approved status">#{a}</span> : '—'}
+        {p ? <span title="JE for paid status" style={{ marginLeft: 6 }}>{' / #'}{p}</span> : ''}
+      </div>
+      {editable ? (
+        <button className="btn-sm" onClick={onResync} style={{ marginTop: 4 }} title="Retry sync">Resync</button>
+      ) : null}
+    </div>
+  );
+}
+
 function ContractSumBlock({ contractSum, changeOrders, onSync, syncing }) {
   const base = Number(contractSum || 0);
   const cos = Number(changeOrders || 0);

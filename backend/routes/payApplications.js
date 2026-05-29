@@ -1,5 +1,6 @@
 // Pay applications + line items
 const express = require('express');
+const cloudledger = require('../lib/cloudledger_client');
 const multer = require('multer');
 const ExcelJS = require('exceljs');
 const { getDb } = require('../db/database');
@@ -17,7 +18,8 @@ const router = express.Router();
 const HEADER_FIELDS = [
   'project_id', 'subcontractor_id', 'app_number',
   'period_start', 'period_end', 'submitted_date',
-  'status', 'contract_sum', 'change_orders', 'retainage_pct', 'notes'
+  'status', 'contract_sum', 'change_orders', 'retainage_pct', 'notes',
+  'payment_method'
 ];
 
 const LINE_FIELDS = [
@@ -127,6 +129,31 @@ router.get('/', (req, res) => {
   `;
   const rows = db.prepare(sql).all(params);
   res.json(rows.map((r) => withTotals(db, r)));
+});
+
+// POST /api/pay-apps/:id/cloudledger/resync
+// Manually retry CloudLedger sync for this pay app's current status.
+// Useful when sync failed previously (CL was down) or when integration was
+// enabled after the pay app already moved past draft.
+router.post('/:id/cloudledger/resync', async (req, res) => {
+  const db = getDb();
+  const pa = db.prepare('SELECT * FROM pay_applications WHERE id = ?').get(req.params.id);
+  if (!pa) return res.status(404).json({ error: 'Pay application not found' });
+  if (!cloudledger.isEnabled()) {
+    return res.status(400).json({ error: 'CloudLedger integration not enabled' });
+  }
+  // Trick: call maybeSyncOnStatusChange with a synthetic "before" state that
+  // forces all transitions up to current to fire. Since CL is idempotent,
+  // already-synced events return their existing JE IDs without duplicating.
+  const synthBefore = { ...pa, status: 'draft' };
+  await maybeSyncOnStatusChange(db, synthBefore, pa);
+  const updated = db.prepare('SELECT * FROM pay_applications WHERE id = ?').get(req.params.id);
+  res.json({
+    ok: true,
+    status: updated.status,
+    cloudledger_je_approved_id: updated.cloudledger_je_approved_id,
+    cloudledger_je_paid_id: updated.cloudledger_je_paid_id,
+  });
 });
 
 // GET /api/pay-apps/:id — single with lines + totals
@@ -355,7 +382,11 @@ router.post('/auto-create', (req, res) => {
 });
 
 // PATCH /api/pay-apps/:id
-router.patch('/:id', (req, res) => {
+//
+// When status transitions to 'approved' or 'paid', also fire a CloudLedger
+// sync (best-effort; failures are logged but do not block the update).
+// The sync is idempotent on CL side, so retries are safe.
+router.patch('/:id', async (req, res) => {
   const db = getDb();
   const updates = [];
   const values = {};
@@ -368,15 +399,92 @@ router.patch('/:id', (req, res) => {
   if (updates.length === 0) {
     return res.status(400).json({ error: 'No updatable fields provided' });
   }
+
+  // Snapshot prior state to detect status transitions
+  const before = db.prepare('SELECT * FROM pay_applications WHERE id = ?').get(req.params.id);
+  if (!before) return res.status(404).json({ error: 'Pay application not found' });
+
   updates.push(`updated_at = datetime('now')`);
   values.id = req.params.id;
-  const result = db.prepare(
+  db.prepare(
     `UPDATE pay_applications SET ${updates.join(', ')} WHERE id = @id`
   ).run(values);
-  if (result.changes === 0) return res.status(404).json({ error: 'Pay application not found' });
   const row = db.prepare('SELECT * FROM pay_applications WHERE id = ?').get(req.params.id);
+
+  // Trigger CloudLedger sync on status transitions
+  await maybeSyncOnStatusChange(db, before, row);
+
   res.json(withTotals(db, row));
 });
+
+// Fire CloudLedger sync events when pay app status transitions.
+// Stores the resulting JE IDs back on the pay app row.
+async function maybeSyncOnStatusChange(db, before, after) {
+  if (!cloudledger.isEnabled()) return;
+  if (before.status === after.status) return;
+
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(after.project_id);
+  if (!project) return;
+  const isOwnerPayApp = after.subcontractor_id == null;
+  const vendor = !isOwnerPayApp
+    ? db.prepare('SELECT * FROM subcontractors WHERE id = ?').get(after.subcontractor_id)
+    : null;
+
+  // Compute the current period net billed amount (G703 totals minus retainage)
+  const totalsRow = db.prepare(`
+    SELECT COALESCE(SUM(completed_this_period + stored_materials), 0) AS gross
+    FROM pay_app_lines WHERE pay_app_id = ?
+  `).get(after.id);
+  const grossThisPeriod = Number(totalsRow.gross || 0);
+  const retainagePct = Number(after.retainage_pct || 0);
+  const retainage = Math.round(grossThisPeriod * (retainagePct / 100) * 100) / 100;
+  const netAmount = Math.round((grossThisPeriod - retainage) * 100) / 100;
+
+  // Skip sync if there's no billable amount yet (e.g., approved before SoV lines
+  // were added). The user can re-trigger sync later by toggling draft -> approved
+  // after fixing the amount, but only if the prior log doesn't already have a
+  // success record. For robustness, also tell CL to forget the previous sync if
+  // we're re-approving with a different amount — TODO in a future iteration.
+  if (netAmount < 0.005) {
+    console.log('[cloudledger] pay app ' + after.id + ' status change skipped (zero amount)');
+    return;
+  }
+
+  // Status: draft|submitted -> approved
+  if (after.status === 'approved' && before.status !== 'approved') {
+    const fn = isOwnerPayApp ? 'syncOwnerPayAppIssued' : 'syncSubPayAppApproved';
+    const payload = {
+      turnkey_project_id: project.id,
+      payapp_id: after.id,
+      vendor_name: vendor ? vendor.name : null,
+      amount: netAmount,
+      date: after.submitted_date || new Date().toISOString().slice(0, 10),
+    };
+    const r = await cloudledger.trySync('pay app ' + after.id + ' approved', () => cloudledger[fn](payload));
+    if (r.ok && r.result && r.result.cl_entry_id) {
+      db.prepare("UPDATE pay_applications SET cloudledger_je_approved_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(r.result.cl_entry_id, after.id);
+    }
+  }
+
+  // Status: approved -> paid
+  if (after.status === 'paid' && before.status !== 'paid') {
+    const fn = isOwnerPayApp ? 'syncOwnerPaymentReceived' : 'syncSubPayAppPaid';
+    const payload = {
+      turnkey_project_id: project.id,
+      payapp_id: after.id,
+      vendor_name: vendor ? vendor.name : null,
+      amount: netAmount,
+      date: new Date().toISOString().slice(0, 10),
+      payment_method: isOwnerPayApp ? undefined : (after.payment_method || 'wire'),
+    };
+    const r = await cloudledger.trySync('pay app ' + after.id + ' paid', () => cloudledger[fn](payload));
+    if (r.ok && r.result && r.result.cl_entry_id) {
+      db.prepare("UPDATE pay_applications SET cloudledger_je_paid_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(r.result.cl_entry_id, after.id);
+    }
+  }
+}
 
 // DELETE /api/pay-apps/:id
 router.delete('/:id', (req, res) => {

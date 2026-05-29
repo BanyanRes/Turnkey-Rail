@@ -1,5 +1,6 @@
 // Projects + nested budget endpoints
 const express = require('express');
+const cloudledger = require('../lib/cloudledger_client');
 const { getDb } = require('../db/database');
 
 const router = express.Router();
@@ -58,12 +59,13 @@ router.get('/:id', (req, res) => {
 });
 
 // POST /api/projects  — create
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   const db = getDb();
   const { code, name } = req.body;
   if (!code || !name) {
     return res.status(400).json({ error: 'code and name are required' });
   }
+  let project;
   try {
     const info = db.prepare(`
       INSERT INTO projects (code, name, address, status, contract_amount, start_date, end_date, notes)
@@ -78,14 +80,35 @@ router.post('/', (req, res) => {
       end_date: req.body.end_date ?? null,
       notes: req.body.notes ?? null,
     });
-    const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
-    res.status(201).json(project);
+    project = db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
   } catch (e) {
     if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
       return res.status(409).json({ error: `Project code "${code}" already exists` });
     }
     throw e;
   }
+
+  // Best-effort: link to CloudLedger (creates entity + seeds POC chart of accounts).
+  // If CL is offline or unconfigured, the project still creates fine; the link
+  // can be retried later via the admin "Link to CloudLedger" action.
+  // Total estimated cost = sum of budget (may be 0 if no budget lines yet)
+  const budgetRow = db.prepare(
+    'SELECT COALESCE(SUM(budgeted_amount), 0) AS total FROM budget_lines WHERE project_id = ?'
+  ).get(project.id);
+  const r = await cloudledger.trySync('link project ' + project.id, () => cloudledger.linkProject({
+    turnkey_project_id: project.id,
+    project_code: project.code,
+    project_name: project.name,
+    contract_amount: project.contract_amount,
+    total_estimated_costs: Number(budgetRow.total || 0),
+  }));
+  if (r.ok && r.result && r.result.project_map && r.result.project_map.cl_entity_id) {
+    db.prepare("UPDATE projects SET cloudledger_entity_id = ?, updated_at = datetime('now') WHERE id = ?")
+      .run(r.result.project_map.cl_entity_id, project.id);
+    project = db.prepare('SELECT * FROM projects WHERE id = ?').get(project.id);
+  }
+
+  res.status(201).json(project);
 });
 
 // PATCH /api/projects/:id  — partial update
@@ -331,6 +354,132 @@ router.get('/:id/reconciliation', (req, res) => {
     },
     rows,
   });
+});
+
+// === CloudLedger admin actions ===
+
+// Manually link an existing project to CloudLedger (idempotent).
+// Useful for projects created before integration was enabled, or after a
+// previous sync failure.
+router.post('/:id/cloudledger/link', async (req, res) => {
+  const db = getDb();
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!cloudledger.isEnabled()) {
+    return res.status(400).json({ error: 'CloudLedger integration is not enabled on this server' });
+  }
+  try {
+    const budgetRow = db.prepare(
+      'SELECT COALESCE(SUM(budgeted_amount), 0) AS total FROM budget_lines WHERE project_id = ?'
+    ).get(project.id);
+    const r = await cloudledger.linkProject({
+      turnkey_project_id: project.id,
+      project_code: project.code,
+      project_name: project.name,
+      contract_amount: project.contract_amount,
+      total_estimated_costs: Number(budgetRow.total || 0),
+    });
+    if (r && r.project_map && r.project_map.cl_entity_id) {
+      db.prepare("UPDATE projects SET cloudledger_entity_id = ?, updated_at = datetime('now') WHERE id = ?")
+        .run(r.project_map.cl_entity_id, project.id);
+    }
+    res.json({ ok: true, project_map: r.project_map });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get current CloudLedger mapping for this project.
+router.get('/:id/cloudledger/status', async (req, res) => {
+  const db = getDb();
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!cloudledger.isEnabled()) {
+    return res.json({ enabled: false });
+  }
+  try {
+    const map = await cloudledger.getProjectMap(project.id);
+    res.json({ enabled: true, linked: true, project_map: map });
+  } catch (e) {
+    if (/HTTP 404/.test(e.message)) {
+      return res.json({ enabled: true, linked: false });
+    }
+    res.status(500).json({ enabled: true, error: e.message });
+  }
+});
+
+// Trigger month-end POC recognition for a project.
+// Computes total_estimated_costs from the budget, sends to CloudLedger.
+//
+// Body: { period_end_date: 'YYYY-MM-DD' }
+router.post('/:id/cloudledger/month-end-poc', async (req, res) => {
+  const db = getDb();
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(req.params.id);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  if (!cloudledger.isEnabled()) {
+    return res.status(400).json({ error: 'CloudLedger integration not enabled' });
+  }
+  const period_end_date = (req.body && req.body.period_end_date) || new Date().toISOString().slice(0, 10);
+
+  // Total estimated costs = sum of budget line budgeted_amount
+  const budgetRow = db.prepare(`
+    SELECT COALESCE(SUM(budgeted_amount), 0) AS total
+    FROM budget_lines WHERE project_id = ?
+  `).get(project.id);
+  const total_estimated_costs = Number(budgetRow.total || 0);
+
+  // Contract amount comes from the project record
+  const contract_amount = Number(project.contract_amount || 0);
+
+  if (total_estimated_costs <= 0 || contract_amount <= 0) {
+    return res.status(400).json({
+      error: 'Cannot compute POC: project requires contract_amount AND budget lines summing > 0',
+      contract_amount, total_estimated_costs,
+    });
+  }
+
+  try {
+    const result = await cloudledger.syncMonthEndPOC({
+      turnkey_project_id: project.id,
+      period_end_date,
+      contract_amount,
+      total_estimated_costs,
+    });
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// === WIP Schedule (Job Schedule) endpoints ===
+// Both proxy to CloudLedger. Turnkey is the operational system; CloudLedger
+// owns the financial truth, so the report is computed there.
+
+router.get('/wip-schedule', async (req, res) => {
+  if (!cloudledger.isEnabled()) {
+    return res.status(400).json({ error: 'CloudLedger integration not enabled' });
+  }
+  try {
+    const data = await cloudledger.getWipScheduleJson(req.query.as_of);
+    res.json(data);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get('/wip-schedule.xlsx', async (req, res) => {
+  if (!cloudledger.isEnabled()) {
+    return res.status(400).json({ error: 'CloudLedger integration not enabled' });
+  }
+  try {
+    const buf = await cloudledger.getWipScheduleXlsxBuffer(req.query.as_of);
+    const asOf = req.query.as_of || new Date().toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="WIP_Schedule_' + asOf + '.xlsx"');
+    res.send(buf);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 module.exports = router;

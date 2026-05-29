@@ -85,6 +85,34 @@ function runMigrations(db) {
     db.exec("CREATE INDEX IF NOT EXISTS idx_docs_pay_app ON documents(pay_app_id)");
     console.log('[db migrate] documents.pay_app_id added');
   }
+
+  // pay_applications: CloudLedger integration columns
+  //   payment_method — for sub pay apps: 'wire'|'ach'|'check'|'bill_com'.
+  //     Null for owner pay apps (they don't have an outgoing payment).
+  //   cloudledger_je_approved_id — CL journal entry created at approved status.
+  //     For sub: Dr.CIP/Cr.AP-Sub.  For owner: Dr.AR/Cr.Billings-Uncompleted.
+  //   cloudledger_je_paid_id — CL journal entry created at paid status.
+  //     For sub: Dr.AP-Sub/Cr.Cash.  For owner: Dr.Cash/Cr.AR.
+  const payAppCols = db.prepare("PRAGMA table_info(pay_applications)").all().map(c => c.name);
+  if (!payAppCols.includes('payment_method')) {
+    db.exec("ALTER TABLE pay_applications ADD COLUMN payment_method TEXT");
+    console.log('[db migrate] pay_applications.payment_method added');
+  }
+  if (!payAppCols.includes('cloudledger_je_approved_id')) {
+    db.exec("ALTER TABLE pay_applications ADD COLUMN cloudledger_je_approved_id INTEGER");
+    console.log('[db migrate] pay_applications.cloudledger_je_approved_id added');
+  }
+  if (!payAppCols.includes('cloudledger_je_paid_id')) {
+    db.exec("ALTER TABLE pay_applications ADD COLUMN cloudledger_je_paid_id INTEGER");
+    console.log('[db migrate] pay_applications.cloudledger_je_paid_id added');
+  }
+
+  // projects: link to CloudLedger entity (set on first sync)
+  const projCols = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
+  if (!projCols.includes('cloudledger_entity_id')) {
+    db.exec("ALTER TABLE projects ADD COLUMN cloudledger_entity_id INTEGER");
+    console.log('[db migrate] projects.cloudledger_entity_id added');
+  }
 }
 
 function getDb() {

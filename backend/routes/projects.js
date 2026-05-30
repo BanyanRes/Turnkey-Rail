@@ -61,30 +61,53 @@ router.get('/:id', (req, res) => {
 // POST /api/projects  — create
 router.post('/', async (req, res) => {
   const db = getDb();
-  const { code, name } = req.body;
-  if (!code || !name) {
-    return res.status(400).json({ error: 'code and name are required' });
+  const { name } = req.body;
+  if (!name) {
+    return res.status(400).json({ error: 'name is required' });
   }
+  // Project codes are auto-assigned as 4-digit sequential numbers (0001, 0002, ...).
+  // We take the highest existing purely-numeric 4-digit code and increment it, so
+  // legacy non-numeric codes (e.g. "LAKE-001") are ignored and never collide.
+  function nextProjectCode() {
+    const rows = db.prepare("SELECT code FROM projects").all();
+    let max = 0;
+    for (const r of rows) {
+      if (/^\d{1,}$/.test(r.code)) { const n = parseInt(r.code, 10); if (n > max) max = n; }
+    }
+    return String(max + 1).padStart(4, '0');
+  }
+  // Allow an explicit code (back-compat), otherwise auto-generate. Retry on rare collision.
+  let code = (req.body.code && String(req.body.code).trim()) || nextProjectCode();
   let project;
   try {
-    const info = db.prepare(`
-      INSERT INTO projects (code, name, address, status, contract_amount, start_date, end_date, notes)
-      VALUES (@code, @name, @address, COALESCE(@status, 'active'), @contract_amount, @start_date, @end_date, @notes)
-    `).run({
-      code,
-      name,
-      address: req.body.address ?? null,
-      status: req.body.status ?? null,
-      contract_amount: req.body.contract_amount ?? null,
-      start_date: req.body.start_date ?? null,
-      end_date: req.body.end_date ?? null,
-      notes: req.body.notes ?? null,
-    });
-    project = db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
-  } catch (e) {
-    if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
-      return res.status(409).json({ error: `Project code "${code}" already exists` });
+    let attempts = 0;
+    while (true) {
+      try {
+        const info = db.prepare(`
+          INSERT INTO projects (code, name, address, status, contract_amount, start_date, end_date, notes)
+          VALUES (@code, @name, @address, COALESCE(@status, 'active'), @contract_amount, @start_date, @end_date, @notes)
+        `).run({
+          code,
+          name,
+          address: req.body.address ?? null,
+          status: req.body.status ?? null,
+          contract_amount: req.body.contract_amount ?? null,
+          start_date: req.body.start_date ?? null,
+          end_date: req.body.end_date ?? null,
+          notes: req.body.notes ?? null,
+        });
+        project = db.prepare('SELECT * FROM projects WHERE id = ?').get(info.lastInsertRowid);
+        break; // success
+      } catch (e) {
+        if (e.code === 'SQLITE_CONSTRAINT_UNIQUE') {
+          // If the auto-assigned code collided (e.g. concurrent create), recompute and retry.
+          if (!req.body.code && attempts < 5) { attempts++; code = nextProjectCode(); continue; }
+          return res.status(409).json({ error: `Project code "${code}" already exists` });
+        }
+        throw e;
+      }
     }
+  } catch (e) {
     throw e;
   }
 

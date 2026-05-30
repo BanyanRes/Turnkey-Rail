@@ -3,7 +3,6 @@ import { parseMoney } from '../utils';
 
 export default function NewProjectForm({ onCreate, onCancel }) {
   const [form, setForm] = useState({
-    code: '',
     name: '',
     address: '',
     contract_amount: '',
@@ -19,15 +18,14 @@ export default function NewProjectForm({ onCreate, onCancel }) {
 
   async function submit(e) {
     e.preventDefault();
-    if (!form.code.trim() || !form.name.trim()) {
-      setError('Code and name are required');
+    if (!form.name.trim()) {
+      setError('Name is required');
       return;
     }
     setBusy(true);
     setError(null);
     try {
       await onCreate({
-        code: form.code.trim(),
         name: form.name.trim(),
         address: form.address.trim() || null,
         contract_amount: form.contract_amount ? parseMoney(form.contract_amount) : null,
@@ -45,15 +43,9 @@ export default function NewProjectForm({ onCreate, onCancel }) {
       <form className="modal" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2>New Project</h2>
 
-        <label>
-          Code *
-          <input
-            value={form.code}
-            onChange={(e) => update('code', e.target.value)}
-            placeholder="BC-001"
-            autoFocus
-          />
-        </label>
+        <p className="form-hint" style={{ fontSize: '12px', color: '#64748b', margin: '0 0 4px' }}>
+          A project number (e.g. 0001) is assigned automatically.
+        </p>
 
         <label>
           Name *
@@ -61,6 +53,7 @@ export default function NewProjectForm({ onCreate, onCancel }) {
             value={form.name}
             onChange={(e) => update('name', e.target.value)}
             placeholder="Sunset Residence"
+            autoFocus
           />
         </label>
 

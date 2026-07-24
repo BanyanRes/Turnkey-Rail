@@ -575,7 +575,7 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
             </div>
           </div>
           <div className="payapp-header-meta">
-            <PeriodEdit payApp={payApp} onSave={updateHeader} />
+            <PeriodEdit payApp={payApp} onSave={updateHeader} editable={editable} />
             <RetainageEdit
               pct={payApp.retainage_pct}
               onSave={(v) => updateHeader({ retainage_pct: v })}
@@ -586,6 +586,8 @@ function PayAppDetail({ payAppId, onBack, editable = true }) {
               changeOrders={payApp.change_orders}
               onSync={editable ? syncChangeOrders : null}
               syncing={syncingCOs}
+              onSaveContractSum={editable ? ((v) => updateHeader({ contract_sum: v })) : null}
+              editable={editable}
             />
             {payApp.subcontractor_id ? (
               <PaymentMethodEdit
@@ -782,14 +784,92 @@ function StatusChanger({ current, onChange }) {
   );
 }
 
-function PeriodEdit({ payApp, onSave }) {
+function PeriodEdit({ payApp, onSave, editable = true }) {
+  const [editing, setEditing] = useState(false);
+  const [start, setStart] = useState(payApp.period_start || '');
+  const [end, setEnd] = useState(payApp.period_end || '');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setStart(payApp.period_start || '');
+    setEnd(payApp.period_end || '');
+  }, [payApp.period_start, payApp.period_end]);
+
   const text = payApp.period_start && payApp.period_end
     ? `${payApp.period_start} → ${payApp.period_end}`
     : 'No period set';
+
+  async function commit() {
+    if (saving) return;
+    const nextStart = start || null;
+    const nextEnd = end || null;
+    if (nextStart === (payApp.period_start || null) && nextEnd === (payApp.period_end || null)) {
+      setEditing(false);
+      return;
+    }
+    setSaving(true);
+    try {
+      await onSave({ period_start: nextStart, period_end: nextEnd });
+      setEditing(false);
+    } catch (e) {
+      alert(e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <div className="meta-item">
+        <div className="label">Period</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <input
+            type="date"
+            className="inline-input"
+            value={start}
+            disabled={saving}
+            onChange={(e) => setStart(e.target.value)}
+          />
+          <span className="muted">→</span>
+          <input
+            type="date"
+            className="inline-input"
+            value={end}
+            disabled={saving}
+            onChange={(e) => setEnd(e.target.value)}
+          />
+          <button type="button" className="btn-icon" onClick={commit} disabled={saving} title="Save">
+            {saving ? '…' : '✓'}
+          </button>
+          <button
+            type="button"
+            className="btn-icon"
+            onClick={() => {
+              setStart(payApp.period_start || '');
+              setEnd(payApp.period_end || '');
+              setEditing(false);
+            }}
+            disabled={saving}
+            title="Cancel"
+          >
+            ×
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="meta-item">
       <div className="label">Period</div>
-      <div className="muted">{text}</div>
+      <div
+        className={editable ? 'inline-editable' : ''}
+        onClick={() => editable && setEditing(true)}
+        style={{ cursor: editable ? 'pointer' : 'default' }}
+        title={editable ? 'Click to edit the billing period' : ''}
+      >
+        {text}
+      </div>
     </div>
   );
 }
@@ -1042,7 +1122,7 @@ function CloudLedgerInfo({ payApp, editable, onResync }) {
   );
 }
 
-function ContractSumBlock({ contractSum, changeOrders, onSync, syncing }) {
+function ContractSumBlock({ contractSum, changeOrders, onSync, syncing, onSaveContractSum, editable = true }) {
   const base = Number(contractSum || 0);
   const cos = Number(changeOrders || 0);
   const revised = base + cos;
@@ -1066,7 +1146,9 @@ function ContractSumBlock({ contractSum, changeOrders, onSync, syncing }) {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, fontSize: 12, lineHeight: 1.3 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <span className="muted">Original</span>
-          <span>{fmtMoney(base)}</span>
+          {editable && onSaveContractSum
+            ? <InlineNum value={base} onSave={onSaveContractSum} />
+            : <span>{fmtMoney(base)}</span>}
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <span className="muted">+ Approved COs</span>

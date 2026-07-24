@@ -74,7 +74,7 @@ function drawG702(doc, { payApp, project, vendor, issuerName }) {
 
   drawLabeledBox(doc, c1, y, colW, 70, recipientLabel, recipientName);
   drawLabeledBox(doc, c2, y, colW, 70, 'FROM',
-    fromName + (vendor ? '\n(General Contractor)' : '\n(General Contractor to Owner)'));
+    fromName + (vendor ? '\n(General Contractor)' : ''));
   drawLabeledBox(doc, c3, y, colW, 70, 'PROJECT',
     `${project.code} — ${project.name}${project.address ? '\n' + project.address : ''}`);
   y += 80;

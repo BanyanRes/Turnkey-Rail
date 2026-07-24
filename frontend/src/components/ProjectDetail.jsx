@@ -2,7 +2,7 @@ import { fmtMoney } from '../utils';
 import BudgetTable from './BudgetTable';
 import ReconciliationPanel from './ReconciliationPanel';
 
-export default function ProjectDetail({ project, onChange, onDelete, editable = true }) {
+export default function ProjectDetail({ project, onChange, onDelete, onEdit, editable = true }) {
   const hasCOs = Number(project.approved_co_total || 0) !== 0;
 
   return (
@@ -11,6 +11,7 @@ export default function ProjectDetail({ project, onChange, onDelete, editable = 
         <div className="detail-title">
           <div className="muted code-label">{project.code}</div>
           <h2>{project.name}</h2>
+          {project.owner_name && <div className="muted">Owner: {project.owner_name}</div>}
           {project.address && <div className="muted">{project.address}</div>}
         </div>
         <div className="header-meta">
@@ -45,6 +46,7 @@ export default function ProjectDetail({ project, onChange, onDelete, editable = 
               {project.status.replace('_', ' ')}
             </div>
           </div>
+          {editable && onEdit && <button className="btn-secondary" onClick={onEdit}>Edit</button>}
           {editable && <button className="btn-danger" onClick={onDelete}>Delete</button>}
         </div>
       </div>

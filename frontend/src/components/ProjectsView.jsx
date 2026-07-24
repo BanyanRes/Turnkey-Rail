@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api';
 import ProjectList from './ProjectList';
 import ProjectDetail from './ProjectDetail';
-import NewProjectForm from './NewProjectForm';
+import ProjectForm from './ProjectForm';
 import { canEdit } from '../permissions';
 
 export default function ProjectsView({ me }) {
@@ -10,6 +10,7 @@ export default function ProjectsView({ me }) {
   const [projects, setProjects] = useState([]);
   const [selectedId, setSelectedId] = useState(null);
   const [creating, setCreating] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -70,6 +71,7 @@ export default function ProjectsView({ me }) {
               project={selectedProject}
               onChange={refresh}
               onDelete={handleDelete}
+              onEdit={() => setEditing(true)}
               editable={editable}
             />
           ) : (
@@ -81,14 +83,26 @@ export default function ProjectsView({ me }) {
       </div>
 
       {creating && (
-        <NewProjectForm
-          onCreate={async (data) => {
+        <ProjectForm
+          onSubmit={async (data) => {
             const created = await api.createProject(data);
             await refresh();
             setSelectedId(created.id);
             setCreating(false);
           }}
           onCancel={() => setCreating(false)}
+        />
+      )}
+
+      {editing && selectedProject && (
+        <ProjectForm
+          project={selectedProject}
+          onSubmit={async (data) => {
+            await api.updateProject(selectedProject.id, data);
+            await refresh();
+            setEditing(false);
+          }}
+          onCancel={() => setEditing(false)}
         />
       )}
     </>

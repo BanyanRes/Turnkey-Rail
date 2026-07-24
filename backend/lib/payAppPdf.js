@@ -168,27 +168,28 @@ function drawG703(doc, { payApp, lines, project }) {
   y += 38;
 
   const cols = [
-    { key: 'item',          label: '#',                   w: 22, align: 'left' },
-    { key: 'description',   label: 'DESCRIPTION OF WORK', w: 0,  align: 'left'  },
-    { key: 'scheduled',     label: 'SCHEDULED VALUE (C)', w: 90, align: 'right' },
-    { key: 'prior',         label: 'PRIOR (D)',           w: 75, align: 'right' },
-    { key: 'thisPeriod',    label: 'THIS PERIOD (E)',     w: 85, align: 'right' },
-    { key: 'stored',        label: 'STORED (F)',          w: 70, align: 'right' },
-    { key: 'totalComplete', label: 'TOTAL (G)',           w: 85, align: 'right' },
-    { key: 'pctComplete',   label: '%',                   w: 40, align: 'right' },
-    { key: 'toFinish',      label: 'TO FINISH',           w: 80, align: 'right' },
+    { key: 'item',          label: 'ITEM NO.',                    w: 30, align: 'left'  },
+    { key: 'description',   label: 'DESCRIPTION OF WORK',         w: 0,  align: 'left'  },
+    { key: 'scheduled',     label: 'SCHEDULED VALUE',             w: 78, align: 'right' },
+    { key: 'prior',         label: 'FROM PREVIOUS APPLICATIONS',  w: 72, align: 'right' },
+    { key: 'thisPeriod',    label: 'WORK COMPLETED THIS PERIOD',  w: 74, align: 'right' },
+    { key: 'stored',        label: 'MATERIALS PRESENTLY STORED (NOT IN E)', w: 66, align: 'right' },
+    { key: 'totalComplete', label: 'TOTAL COMPLETED AND STORED TO DATE (D+E+F)', w: 78, align: 'right' },
+    { key: 'pctComplete',   label: '% TO DATE',                   w: 42, align: 'right' },
+    { key: 'toFinish',      label: 'BALANCE TO FINISH (C-G)',     w: 72, align: 'right' },
+    { key: 'retainage',     label: 'RETAINAGE',                   w: 68, align: 'right' },
   ];
   const fixedW = cols.reduce((s, c) => s + c.w, 0);
   cols[1].w = pageWidth - fixedW;
 
-  const headH = 24;
+  const headH = 40;
   doc.lineWidth(0.6).strokeColor('#333');
   doc.fillColor('#f0f0f0').rect(left, y, pageWidth, headH).fill();
   doc.strokeColor('#333').rect(left, y, pageWidth, headH).stroke();
   let cx = left;
   cols.forEach((c) => {
-    doc.font('Helvetica-Bold').fontSize(8).fillColor('#000');
-    doc.text(c.label, cx + 4, y + 8, { width: c.w - 8, align: c.align });
+    doc.font('Helvetica-Bold').fontSize(6.5).fillColor('#000');
+    doc.text(c.label, cx + 3, y + 4, { width: c.w - 6, align: c.align });
     cx += c.w;
     if (c !== cols[cols.length - 1]) {
       doc.strokeColor('#ccc').lineWidth(0.3)
@@ -198,8 +199,9 @@ function drawG703(doc, { payApp, lines, project }) {
   y += headH;
 
   const rowH = 20;
+  const retPct = Number(payApp.retainage_pct || 0) / 100;
   doc.font('Helvetica').fontSize(9).fillColor('#000');
-  let totals = { scheduled: 0, prior: 0, thisPeriod: 0, stored: 0, totalComplete: 0 };
+  let totals = { scheduled: 0, prior: 0, thisPeriod: 0, stored: 0, totalComplete: 0, retainage: 0 };
 
   lines.forEach((l, idx) => {
     if (y + rowH > doc.page.height - doc.page.margins.bottom - 60) {
@@ -214,12 +216,14 @@ function drawG703(doc, { payApp, lines, project }) {
     const stored = Number(l.stored_materials || 0);
     const totalComplete = prior + thisPeriod + stored;
     const toFinish = scheduled - totalComplete;
+    const retainage = totalComplete * retPct;
 
     totals.scheduled += scheduled;
     totals.prior += prior;
     totals.thisPeriod += thisPeriod;
     totals.stored += stored;
     totals.totalComplete += totalComplete;
+    totals.retainage += retainage;
 
     if (idx % 2 === 1) {
       doc.fillColor('#fafafa').rect(left + 0.3, y + 0.3, pageWidth - 0.6, rowH - 0.6).fill();
@@ -237,6 +241,7 @@ function drawG703(doc, { payApp, lines, project }) {
       totalComplete: fmtMoney(totalComplete),
       pctComplete: fmtPct(totalComplete, scheduled),
       toFinish: fmtMoney(toFinish),
+      retainage: fmtMoney(retainage),
     };
 
     cx = left;
@@ -267,6 +272,7 @@ function drawG703(doc, { payApp, lines, project }) {
     totalComplete: fmtMoney(totals.totalComplete),
     pctComplete: fmtPct(totals.totalComplete, totals.scheduled),
     toFinish: fmtMoney(totals.scheduled - totals.totalComplete),
+    retainage: fmtMoney(totals.retainage),
   };
   cx = left;
   cols.forEach((c) => {

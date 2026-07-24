@@ -523,6 +523,7 @@ router.get('/:id/pdf', (req, res) => {
       p.code AS project_code,
       p.name AS project_name,
       p.address AS project_address,
+      p.owner_name AS project_owner_name,
       s.name AS subcontractor_name,
       s.trade AS subcontractor_trade
     FROM pay_applications pa
@@ -542,6 +543,7 @@ router.get('/:id/pdf', (req, res) => {
     code: header.project_code,
     name: header.project_name,
     address: header.project_address,
+    owner_name: header.project_owner_name,
   };
   const vendor = header.subcontractor_id
     ? { name: header.subcontractor_name, trade: header.subcontractor_trade }
@@ -565,7 +567,7 @@ router.get('/:id/pdf', (req, res) => {
     lines,
     project,
     vendor,
-    issuerName: process.env.GC_NAME || 'Banyan Residential',
+    issuerName: process.env.GC_NAME || 'Turnkey Rail LLC',
   });
 });
 

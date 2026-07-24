@@ -67,8 +67,10 @@ function drawG702(doc, { payApp, project, vendor, issuerName }) {
   const c3 = left + (colW + 12) * 2;
 
   const recipientLabel = vendor ? 'TO CONTRACTOR' : 'TO OWNER';
-  const recipientName  = vendor ? `${vendor.name}${vendor.trade ? ' (' + vendor.trade + ')' : ''}` : 'Project Owner';
-  const fromName = issuerName || 'General Contractor';
+  const recipientName  = vendor
+    ? `${vendor.name}${vendor.trade ? ' (' + vendor.trade + ')' : ''}`
+    : (project.owner_name || 'Project Owner');
+  const fromName = issuerName || 'Turnkey Rail LLC';
 
   drawLabeledBox(doc, c1, y, colW, 70, recipientLabel, recipientName);
   drawLabeledBox(doc, c2, y, colW, 70, 'FROM',

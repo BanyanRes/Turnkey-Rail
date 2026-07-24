@@ -113,6 +113,10 @@ function runMigrations(db) {
     db.exec("ALTER TABLE projects ADD COLUMN cloudledger_entity_id INTEGER");
     console.log('[db migrate] projects.cloudledger_entity_id added');
   }
+  if (!projCols.includes('owner_name')) {
+    db.exec("ALTER TABLE projects ADD COLUMN owner_name TEXT");
+    console.log('[db migrate] projects.owner_name added');
+  }
 }
 
 function getDb() {

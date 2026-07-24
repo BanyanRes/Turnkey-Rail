@@ -4,6 +4,7 @@ import { parseMoney } from '../utils';
 export default function NewProjectForm({ onCreate, onCancel }) {
   const [form, setForm] = useState({
     name: '',
+    owner_name: '',
     address: '',
     contract_amount: '',
     start_date: '',
@@ -27,6 +28,7 @@ export default function NewProjectForm({ onCreate, onCancel }) {
     try {
       await onCreate({
         name: form.name.trim(),
+        owner_name: form.owner_name.trim() || null,
         address: form.address.trim() || null,
         contract_amount: form.contract_amount ? parseMoney(form.contract_amount) : null,
         start_date: form.start_date || null,
@@ -54,6 +56,15 @@ export default function NewProjectForm({ onCreate, onCancel }) {
             onChange={(e) => update('name', e.target.value)}
             placeholder="Sunset Residence"
             autoFocus
+          />
+        </label>
+
+        <label>
+          Owner name
+          <input
+            value={form.owner_name}
+            onChange={(e) => update('owner_name', e.target.value)}
+            placeholder="CLR Buna Property Owner"
           />
         </label>
 

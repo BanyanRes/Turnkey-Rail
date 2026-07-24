@@ -6,7 +6,7 @@ const { getDb } = require('../db/database');
 const router = express.Router();
 
 const PROJECT_FIELDS = [
-  'code', 'name', 'address', 'status',
+  'code', 'name', 'address', 'owner_name', 'status',
   'contract_amount', 'start_date', 'end_date', 'notes'
 ];
 
@@ -84,12 +84,13 @@ router.post('/', async (req, res) => {
     while (true) {
       try {
         const info = db.prepare(`
-          INSERT INTO projects (code, name, address, status, contract_amount, start_date, end_date, notes)
-          VALUES (@code, @name, @address, COALESCE(@status, 'active'), @contract_amount, @start_date, @end_date, @notes)
+          INSERT INTO projects (code, name, address, owner_name, status, contract_amount, start_date, end_date, notes)
+          VALUES (@code, @name, @address, @owner_name, COALESCE(@status, 'active'), @contract_amount, @start_date, @end_date, @notes)
         `).run({
           code,
           name,
           address: req.body.address ?? null,
+          owner_name: req.body.owner_name ?? null,
           status: req.body.status ?? null,
           contract_amount: req.body.contract_amount ?? null,
           start_date: req.body.start_date ?? null,

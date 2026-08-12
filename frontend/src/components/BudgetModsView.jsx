@@ -26,6 +26,7 @@ export default function BudgetModsView({ me }) {
   const [projects, setProjects] = useState([]);
   const [projectId, setProjectId] = useState(null);
   const [rows, setRows] = useState([]);
+  const [budgetLines, setBudgetLines] = useState([]);
   const [summary, setSummary] = useState({ approved_total: 0, draft_total: 0, count: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -61,6 +62,34 @@ export default function BudgetModsView({ me }) {
   }, [projectId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Load the project's budget lines to drive the cost-code dropdown.
+  useEffect(() => {
+    if (!projectId) { setBudgetLines([]); return; }
+    let cancelled = false;
+    api.listBudget(projectId)
+      .then((r) => { if (!cancelled) setBudgetLines(r); })
+      .catch(() => { if (!cancelled) setBudgetLines([]); });
+    return () => { cancelled = true; };
+  }, [projectId]);
+
+  // De-duplicate cost codes; remember each code's category so picking a code can
+  // auto-fill the category column.
+  const costCodeOptions = [];
+  const seenCodes = new Set();
+  const catByCode = {};
+  for (const b of budgetLines) {
+    const code = (b.cost_code || '').trim();
+    if (!code) continue;
+    if (!(code in catByCode)) catByCode[code] = b.category || '';
+    if (seenCodes.has(code)) continue;
+    seenCodes.add(code);
+    costCodeOptions.push({ code, description: b.description || '' });
+  }
+
+  function pickCostCode(code) {
+    setForm((f) => ({ ...f, cost_code: code, category: catByCode[code] || f.category }));
+  }
 
   function resetForm() { setForm(EMPTY); setEditingId(null); }
 
@@ -157,8 +186,18 @@ export default function BudgetModsView({ me }) {
 
       {editable && (
         <form onSubmit={submit} className="bm-form" style={bmForm}>
-          <input placeholder="Cost code *" value={form.cost_code}
-            onChange={(e) => setForm({ ...form, cost_code: e.target.value })} style={{ width: 90 }} />
+          <select value={form.cost_code} onChange={(e) => pickCostCode(e.target.value)}
+            style={{ width: 210 }} title="Cost code (from this project's budget)">
+            <option value="">Cost code *</option>
+            {costCodeOptions.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code}{c.description ? ` — ${c.description}` : ''}
+              </option>
+            ))}
+            {form.cost_code && !seenCodes.has(form.cost_code) && (
+              <option value={form.cost_code}>{form.cost_code}</option>
+            )}
+          </select>
           <input placeholder="Category" value={form.category}
             onChange={(e) => setForm({ ...form, category: e.target.value })} style={{ width: 130 }} />
           <input placeholder="Description *" value={form.description}

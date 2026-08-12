@@ -23,6 +23,7 @@ const REASONS = [
 const EMPTY = {
   project_id: '',
   subcontractor_id: '',
+  cost_code: '',
   description: '',
   reason: '',
   amount: '',
@@ -207,6 +208,7 @@ function ChangeOrderForm({ initial, isNew, onSave, onCancel }) {
   const [form, setForm] = useState({ ...EMPTY, ...initial, amount: initial.amount ?? '' });
   const [projects, setProjects] = useState([]);
   const [subs, setSubs] = useState([]);
+  const [budgetLines, setBudgetLines] = useState([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -216,8 +218,36 @@ function ChangeOrderForm({ initial, isNew, onSave, onCancel }) {
       .catch((e) => setError(e.message));
   }, []);
 
+  // Load the selected project's budget lines so the cost-code dropdown offers
+  // the exact codes on that project's budget — a CO tagged with one of these
+  // pulls straight to the matching row of the Cost Report.
+  useEffect(() => {
+    if (!form.project_id) { setBudgetLines([]); return; }
+    let cancelled = false;
+    api.listBudget(form.project_id)
+      .then((rows) => { if (!cancelled) setBudgetLines(rows); })
+      .catch(() => { if (!cancelled) setBudgetLines([]); });
+    return () => { cancelled = true; };
+  }, [form.project_id]);
+
+  // De-duplicate cost codes (a budget can have several lines per code); keep the
+  // first description seen for each code as the dropdown label.
+  const costCodeOptions = [];
+  const seenCodes = new Set();
+  for (const b of budgetLines) {
+    const code = (b.cost_code || '').trim();
+    if (!code || seenCodes.has(code)) continue;
+    seenCodes.add(code);
+    costCodeOptions.push({ code, description: b.description || '' });
+  }
+
   function update(k, v) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  // Changing project (only possible on a new CO) invalidates the prior code.
+  function updateProject(v) {
+    setForm((f) => ({ ...f, project_id: v, cost_code: '' }));
   }
 
   async function submit(e) {
@@ -231,6 +261,7 @@ function ChangeOrderForm({ initial, isNew, onSave, onCancel }) {
       const payload = {
         project_id: Number(form.project_id),
         subcontractor_id: form.subcontractor_id ? Number(form.subcontractor_id) : null,
+        cost_code: form.cost_code || null,
         description: form.description.trim(),
         reason: form.reason || null,
         amount: parseMoney(form.amount),
@@ -261,7 +292,7 @@ function ChangeOrderForm({ initial, isNew, onSave, onCancel }) {
             Project *
             <select
               value={form.project_id}
-              onChange={(e) => update('project_id', e.target.value)}
+              onChange={(e) => updateProject(e.target.value)}
               autoFocus
               disabled={!isNew}
             >
@@ -295,6 +326,28 @@ function ChangeOrderForm({ initial, isNew, onSave, onCancel }) {
             onChange={(e) => update('description', e.target.value)}
             placeholder="Add ADU foundation"
           />
+        </label>
+
+        <label>
+          Budget cost code
+          <select
+            value={form.cost_code || ''}
+            onChange={(e) => update('cost_code', e.target.value)}
+            disabled={!form.project_id}
+          >
+            <option value="">— Unallocated —</option>
+            {costCodeOptions.map((c) => (
+              <option key={c.code} value={c.code}>
+                {c.code}{c.description ? ` — ${c.description}` : ''}
+              </option>
+            ))}
+            {form.cost_code && !seenCodes.has(form.cost_code) && (
+              <option value={form.cost_code}>{form.cost_code}</option>
+            )}
+          </select>
+          <span className="muted" style={{ fontSize: 11 }}>
+            Ties this change order to a budget line so it pulls to the right row of the Cost Report.
+          </span>
         </label>
 
         <div className="row-2">

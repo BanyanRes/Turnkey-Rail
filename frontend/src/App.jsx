@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { api, setOn401Handler } from './api';
 import ProjectsView from './components/ProjectsView';
+import BudgetModsView from './components/BudgetModsView';
 import VendorsView from './components/VendorsView';
 import PayAppsView from './components/PayAppsView';
 import ChangeOrdersView from './components/ChangeOrdersView';
@@ -15,6 +16,7 @@ import './App.css';
 
 const BASE_TABS = [
   { id: 'projects', label: 'Projects', perm: 'projects' },
+  { id: 'budgetmods', label: 'Budget Mods', perm: 'projects' },
   { id: 'schedule', label: 'Schedule', perm: 'schedule' },
   { id: 'vendors', label: 'Vendors', perm: 'vendors' },
   { id: 'payapps', label: 'Pay Apps', perm: 'payapps' },
@@ -148,6 +150,7 @@ function MainApp() {
 
       <div className="app-body">
         {tab === 'projects' && <ProjectsView me={me} />}
+        {tab === 'budgetmods' && <BudgetModsView me={me} />}
         {tab === 'schedule' && <ScheduleView me={me} />}
         {tab === 'vendors' && <VendorsView me={me} />}
         {tab === 'payapps' && <PayAppsView me={me} />}

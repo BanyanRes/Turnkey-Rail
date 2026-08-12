@@ -249,6 +249,7 @@ const gate = (tab) => (req, res, next) => {
 
 app.use('/api/projects', gate('projects'), require('./routes/projects'));
 app.use('/api/budget-lines', gate('projects'), require('./routes/budgetLines'));
+app.use('/api/budget-modifications', gate('projects'), require('./routes/budgetModifications'));
 app.use('/api/subcontractors', gate('vendors'), require('./routes/subcontractors'));
 app.use('/api/pay-apps', gate('payapps'), require('./routes/payApplications').router);
 app.use('/api/pay-app-lines', gate('payapps'), require('./routes/payAppLines'));

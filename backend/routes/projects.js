@@ -1,6 +1,7 @@
 // Projects + nested budget endpoints
 const express = require('express');
 const cloudledger = require('../lib/cloudledger_client');
+const { computeRow, totalRow } = require('../lib/costReportCalc');
 const { getDb } = require('../db/database');
 
 const router = express.Router();
@@ -379,6 +380,247 @@ router.get('/:id/reconciliation', (req, res) => {
     rows,
   });
 });
+
+// =============================================================
+// COST REPORT — the "Summary" tab, mirrored per project.
+//
+// GET /api/projects/:id/cost-report[?as_of=YYYY-MM-DD]
+//
+// Returns one row per budget line, grouped by category with subtotals and a
+// grand total, carrying all 18 columns of the Turnkey Rail Budget Projection
+// Report. Data sources per column:
+//   Original Budget      budget_lines.budgeted_amount
+//   Budget Modifications approved rows in budget_modifications (by cost code)
+//   Approved OCOs        approved owner change orders (by cost code)
+//   Committed Costs      latest sub pay app's scheduled values (by budget line)
+//   Executed COs         approved sub change orders (by cost code)
+//   Pending COs          draft/submitted sub change orders (by cost code)
+//   Commitment Billings  latest sub pay app's completed-to-date (by budget line)
+//   Direct Costs         CloudLedger GL, best-effort (by cost code)
+// Everything else is derived (see lib/costReportCalc.js).
+//
+// Cost-code-keyed sources attach to the FIRST budget line carrying that code;
+// amounts whose code matches no budget line (and sub pay-app lines with no
+// linked budget line) collect on a single "Unallocated" row so the report
+// always foots to the underlying data.
+// =============================================================
+
+const COST_REPORT_COLUMNS = [
+  { key: 'original_budget',        label: 'Original Budget',        letter: 'A', computed: false },
+  { key: 'budget_modifications',   label: 'Budget Modifications',   letter: 'B', computed: false },
+  { key: 'approved_ocos',          label: 'Approved OCOs',          letter: 'C', computed: false },
+  { key: 'revised_budget',         label: 'Revised Budget',         letter: 'D', computed: true },
+  { key: 'committed_costs',        label: 'Committed Costs',        letter: 'E', computed: false },
+  { key: 'executed_cos',           label: 'Executed Change Orders', letter: 'F', computed: false },
+  { key: 'pending_cos',            label: 'Pending Change Orders',  letter: 'G', computed: false },
+  { key: 'total_committed',        label: 'Total Committed',        letter: 'H', computed: true },
+  { key: 'commitment_billings',    label: 'Commitment Billings',    letter: 'I', computed: false },
+  { key: 'open_commitment',        label: 'Open Commitment Balance',letter: 'J', computed: true },
+  { key: 'direct_costs',           label: 'Direct Costs',           letter: 'K', computed: false },
+  { key: 'total_job_cost',         label: 'Total Job Cost to Date', letter: 'L', computed: true },
+  { key: 'projected_cost',         label: 'Projected Cost',         letter: 'M', computed: true },
+  { key: 'forecast_to_complete',   label: 'Forecast to Complete',   letter: 'N', computed: true },
+  { key: 'estimated_at_completion',label: 'Estimated Cost at Completion', letter: 'O', computed: true },
+  { key: 'buyout_savings',         label: 'Buyout Savings',         letter: 'P', computed: true },
+  { key: 'balance_to_fund',        label: 'Balance to Fund',        letter: 'Q', computed: true },
+  { key: 'pct_complete',           label: '% Complete to Costs',    letter: 'R', computed: true, percent: true },
+];
+
+router.get('/:id/cost-report', async (req, res) => {
+  const db = getDb();
+  const projectId = Number(req.params.id);
+  const project = db.prepare('SELECT * FROM projects WHERE id = ?').get(projectId);
+  if (!project) return res.status(404).json({ error: 'Project not found' });
+  const asOf = req.query.as_of || new Date().toISOString().slice(0, 10);
+
+  // --- Budget lines: the skeleton of the report ---
+  const budgetLines = db.prepare(`
+    SELECT id, cost_code, category, description, budgeted_amount, sort_order
+    FROM budget_lines WHERE project_id = ?
+    ORDER BY sort_order ASC, id ASC
+  `).all(projectId);
+
+  // --- Budget modifications (approved) by cost code ---
+  const modRows = db.prepare(`
+    SELECT cost_code, COALESCE(SUM(amount), 0) AS total
+    FROM budget_modifications
+    WHERE project_id = ? AND status = 'approved'
+    GROUP BY cost_code
+  `).all(projectId);
+  const modsByCode = mapByCode(modRows);
+
+  // --- Change orders by cost code, split by owner/sub and status ---
+  const coRows = db.prepare(`
+    SELECT
+      cost_code,
+      COALESCE(SUM(CASE WHEN subcontractor_id IS NULL AND status = 'approved' THEN amount ELSE 0 END), 0) AS approved_ocos,
+      COALESCE(SUM(CASE WHEN subcontractor_id IS NOT NULL AND status = 'approved' THEN amount ELSE 0 END), 0) AS executed_cos,
+      COALESCE(SUM(CASE WHEN subcontractor_id IS NOT NULL AND status IN ('draft','submitted') THEN amount ELSE 0 END), 0) AS pending_cos
+    FROM change_orders
+    WHERE project_id = ?
+    GROUP BY cost_code
+  `).all(projectId);
+  const ocosByCode = new Map();
+  const execByCode = new Map();
+  const pendByCode = new Map();
+  for (const r of coRows) {
+    const code = normCode(r.cost_code);
+    ocosByCode.set(code, Number(r.approved_ocos || 0));
+    execByCode.set(code, Number(r.executed_cos || 0));
+    pendByCode.set(code, Number(r.pending_cos || 0));
+  }
+
+  // --- Committed + Commitment Billings from each SUB's latest pay app ---
+  // "Latest" = highest app_number for that sub on this project. Its schedule of
+  // values is the committed subcontract by budget line; its completed-to-date
+  // (prior + this period + stored) is the cumulative commitment billing.
+  const commitRows = db.prepare(`
+    SELECT
+      pal.budget_line_id,
+      COALESCE(SUM(pal.scheduled_value), 0) AS committed,
+      COALESCE(SUM(pal.completed_previous + pal.completed_this_period + pal.stored_materials), 0) AS billed
+    FROM pay_applications pa
+    JOIN pay_app_lines pal ON pal.pay_app_id = pa.id
+    WHERE pa.project_id = ?
+      AND pa.subcontractor_id IS NOT NULL
+      AND pa.app_number = (
+        SELECT MAX(pa2.app_number) FROM pay_applications pa2
+        WHERE pa2.project_id = pa.project_id AND pa2.subcontractor_id = pa.subcontractor_id
+      )
+    GROUP BY pal.budget_line_id
+  `).all(projectId);
+  const committedByLine = new Map();
+  const billedByLine = new Map();
+  let unallocCommitted = 0;
+  let unallocBilled = 0;
+  for (const r of commitRows) {
+    if (r.budget_line_id == null) {
+      unallocCommitted += Number(r.committed || 0);
+      unallocBilled += Number(r.billed || 0);
+    } else {
+      committedByLine.set(r.budget_line_id, Number(r.committed || 0));
+      billedByLine.set(r.budget_line_id, Number(r.billed || 0));
+    }
+  }
+
+  // --- Direct costs from CloudLedger (best-effort) ---
+  const directByCode = new Map();
+  let directCostsAvailable = false;
+  let directCostsNote = 'CloudLedger integration disabled';
+  if (cloudledger.isEnabled()) {
+    try {
+      const cl = await cloudledger.getDirectCosts(projectId, asOf);
+      const lines = (cl && Array.isArray(cl.lines)) ? cl.lines : [];
+      for (const l of lines) {
+        directByCode.set(normCode(l.cost_code), Number(l.amount || 0));
+      }
+      directCostsAvailable = true;
+      directCostsNote = null;
+    } catch (e) {
+      directCostsNote = 'CloudLedger direct-costs unavailable: ' + e.message;
+    }
+  }
+
+  // Track which cost-code-keyed amounts get consumed by a budget line, so the
+  // leftovers can be swept into the Unallocated row.
+  const consumedCode = { mods: new Set(), ocos: new Set(), exec: new Set(), pend: new Set(), direct: new Set() };
+  const seenCode = new Set();
+
+  const reportLines = budgetLines.map((b) => {
+    const code = normCode(b.cost_code);
+    const firstForCode = !seenCode.has(code);
+    seenCode.add(code);
+    // A cost-code-keyed source only lands on the FIRST budget line with that
+    // code (avoids double-counting when several lines share a code).
+    const take = (map, bucket) => {
+      if (!firstForCode || !map.has(code)) return 0;
+      consumedCode[bucket].add(code);
+      return map.get(code);
+    };
+    return computeRow({
+      budget_line_id: b.id,
+      cost_code: b.cost_code,
+      category: b.category || 'Uncategorized',
+      description: b.description,
+      original_budget: Number(b.budgeted_amount || 0),
+      budget_modifications: take(modsByCode, 'mods'),
+      approved_ocos: take(ocosByCode, 'ocos'),
+      committed_costs: committedByLine.get(b.id) || 0,
+      executed_cos: take(execByCode, 'exec'),
+      pending_cos: take(pendByCode, 'pend'),
+      commitment_billings: billedByLine.get(b.id) || 0,
+      direct_costs: take(directByCode, 'direct'),
+    });
+  });
+
+  // --- Unallocated row: anything keyed to a cost code with no budget line,
+  // plus sub pay-app lines with no linked budget line. ---
+  const leftover = (map, consumed) => {
+    let sum = 0;
+    for (const [code, val] of map.entries()) {
+      if (!consumed.has(code)) sum += Number(val || 0);
+    }
+    return sum;
+  };
+  const unalloc = {
+    budget_modifications: leftover(modsByCode, consumedCode.mods),
+    approved_ocos: leftover(ocosByCode, consumedCode.ocos),
+    executed_cos: leftover(execByCode, consumedCode.exec),
+    pending_cos: leftover(pendByCode, consumedCode.pend),
+    direct_costs: leftover(directByCode, consumedCode.direct),
+    committed_costs: unallocCommitted,
+    commitment_billings: unallocBilled,
+  };
+  const hasUnalloc = Object.values(unalloc).some((v) => Math.abs(Number(v || 0)) > 0.005);
+  if (hasUnalloc) {
+    reportLines.push(computeRow({
+      budget_line_id: null,
+      cost_code: '—',
+      category: 'Unallocated',
+      description: 'Unallocated (no matching budget line)',
+      original_budget: 0,
+      ...unalloc,
+    }));
+  }
+
+  // --- Group into categories in first-seen order, with subtotals ---
+  const order = [];
+  const byCat = new Map();
+  for (const row of reportLines) {
+    const cat = row.category || 'Uncategorized';
+    if (!byCat.has(cat)) { byCat.set(cat, []); order.push(cat); }
+    byCat.get(cat).push(row);
+  }
+  const categories = order.map((cat) => {
+    const rows = byCat.get(cat);
+    return { category: cat, rows, subtotal: totalRow(rows, { category: cat, description: 'Total ' + cat }) };
+  });
+  const grand_total = totalRow(reportLines, { category: null, description: 'Total Project Costs' });
+
+  res.json({
+    project: {
+      id: project.id, code: project.code, name: project.name,
+      owner_name: project.owner_name || null, status: project.status,
+      contract_amount: Number(project.contract_amount || 0),
+    },
+    as_of: asOf,
+    columns: COST_REPORT_COLUMNS,
+    categories,
+    grand_total,
+    direct_costs: { available: directCostsAvailable, note: directCostsNote },
+  });
+});
+
+// Normalize a cost code for map keys (null/blank -> a stable sentinel).
+function normCode(code) {
+  const c = (code == null ? '' : String(code)).trim();
+  return c === '' ? ' nocode' : c;
+}
+function mapByCode(rows) {
+  const m = new Map();
+  for (const r of rows) m.set(normCode(r.cost_code), Number(r.total || 0));
+  return m;
+}
 
 // === CloudLedger admin actions ===
 

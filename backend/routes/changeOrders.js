@@ -7,7 +7,7 @@ const router = express.Router();
 const FIELDS = [
   'project_id', 'subcontractor_id', 'co_number',
   'description', 'reason', 'amount', 'days_added',
-  'requested_date', 'approved_date', 'status', 'notes'
+  'requested_date', 'approved_date', 'status', 'notes', 'cost_code'
 ];
 
 // GET /api/change-orders — list across all projects with joins
@@ -89,11 +89,11 @@ router.post('/', (req, res) => {
     INSERT INTO change_orders
       (project_id, subcontractor_id, co_number,
        description, reason, amount, days_added,
-       requested_date, approved_date, status, notes)
+       requested_date, approved_date, status, notes, cost_code)
     VALUES
       (@project_id, @subcontractor_id, @co_number,
        @description, @reason, @amount, @days_added,
-       @requested_date, @approved_date, COALESCE(@status, 'draft'), @notes)
+       @requested_date, @approved_date, COALESCE(@status, 'draft'), @notes, @cost_code)
   `).run({
     project_id,
     subcontractor_id: subId,
@@ -106,6 +106,7 @@ router.post('/', (req, res) => {
     approved_date: req.body.approved_date ?? null,
     status: req.body.status ?? null,
     notes: req.body.notes ?? null,
+    cost_code: req.body.cost_code ?? null,
   });
   const row = db.prepare('SELECT * FROM change_orders WHERE id = ?').get(info.lastInsertRowid);
   res.status(201).json(row);

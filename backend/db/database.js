@@ -117,6 +117,16 @@ function runMigrations(db) {
     db.exec("ALTER TABLE projects ADD COLUMN owner_name TEXT");
     console.log('[db migrate] projects.owner_name added');
   }
+
+  // change_orders.cost_code — optional cost-code tag so approved owner change
+  // orders (OCOs) and executed/pending sub change orders land on the correct
+  // row of the project Cost Report. Null = unallocated: the CO amount rolls
+  // into an "Unallocated" line on the report so nothing is silently dropped.
+  const coCols = db.prepare("PRAGMA table_info(change_orders)").all().map(c => c.name);
+  if (!coCols.includes('cost_code')) {
+    db.exec("ALTER TABLE change_orders ADD COLUMN cost_code TEXT");
+    console.log('[db migrate] change_orders.cost_code added');
+  }
 }
 
 function getDb() {

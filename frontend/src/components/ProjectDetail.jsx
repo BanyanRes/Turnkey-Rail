@@ -1,6 +1,7 @@
 import { fmtMoney } from '../utils';
 import BudgetTable from './BudgetTable';
 import ReconciliationPanel from './ReconciliationPanel';
+import CostReport from './CostReport';
 
 export default function ProjectDetail({ project, onChange, onDelete, onEdit, editable = true }) {
   const hasCOs = Number(project.approved_co_total || 0) !== 0;
@@ -52,6 +53,8 @@ export default function ProjectDetail({ project, onChange, onDelete, onEdit, edi
       </div>
 
       <BudgetTable projectId={project.id} onTotalsChange={onChange} editable={editable} />
+
+      <CostReport projectId={project.id} />
 
       <ReconciliationPanel projectId={project.id} />
     </div>

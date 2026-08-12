@@ -33,6 +33,36 @@ CREATE TABLE IF NOT EXISTS budget_lines (
 CREATE INDEX IF NOT EXISTS idx_budget_lines_project ON budget_lines(project_id);
 CREATE INDEX IF NOT EXISTS idx_budget_lines_cost_code ON budget_lines(project_id, cost_code);
 
+-- Budget Modifications / Allocations
+-- Dev managers log budget changes here (reallocations between cost codes,
+-- contingency draws, owner-funded budget increases). Each row is a SIGNED
+-- dollar change tied to a cost code. The per-cost-code total of approved rows
+-- rolls up into the "Budget Modifications" column of the project Cost Report.
+--
+--   amount  — signed. positive = add to that cost code's budget,
+--             negative = pull from it. A pure reallocation is two rows
+--             (a minus on the source code, a plus on the destination) that
+--             net to zero at the project level.
+--   kind    — modification | allocation | contingency | owner_funded (label only)
+--   status  — draft | approved. Only 'approved' rows roll into the report.
+CREATE TABLE IF NOT EXISTS budget_modifications (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  cost_code     TEXT    NOT NULL,
+  category      TEXT,
+  description   TEXT    NOT NULL,
+  amount        REAL    NOT NULL DEFAULT 0,
+  kind          TEXT    NOT NULL DEFAULT 'modification',
+  status        TEXT    NOT NULL DEFAULT 'approved',
+  mod_date      TEXT,
+  notes         TEXT,
+  created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+  updated_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_budgetmods_project ON budget_modifications(project_id);
+CREATE INDEX IF NOT EXISTS idx_budgetmods_cost_code ON budget_modifications(project_id, cost_code);
+
 -- Subcontractors / vendors master
 CREATE TABLE IF NOT EXISTS subcontractors (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -59,6 +59,26 @@ export const api = {
   deleteBudgetLine: (id) =>
     request(`/budget-lines/${id}`, { method: 'DELETE' }),
 
+  // Cost Report — the mirrored "Summary" report for a project.
+  getCostReport: (projectId, asOf) => {
+    const qs = asOf ? `?as_of=${encodeURIComponent(asOf)}` : '';
+    return request(`/projects/${projectId}/cost-report${qs}`);
+  },
+
+  // Budget Modifications / Allocations
+  listBudgetMods: (params = {}) => {
+    const q = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v != null && v !== '')
+    ).toString();
+    return request(`/budget-modifications${q ? `?${q}` : ''}`);
+  },
+  createBudgetMod: (data) =>
+    request('/budget-modifications', { method: 'POST', body: JSON.stringify(data) }),
+  updateBudgetMod: (id, data) =>
+    request(`/budget-modifications/${id}`, { method: 'PATCH', body: JSON.stringify(data) }),
+  deleteBudgetMod: (id) =>
+    request(`/budget-modifications/${id}`, { method: 'DELETE' }),
+
   // Subcontractors
   listSubs: (params = {}) => {
     const q = new URLSearchParams(

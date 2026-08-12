@@ -112,6 +112,19 @@ async function getWipScheduleJson(asOfDate) {
   return clGet('/api/turnkey/wip-schedule' + qs);
 }
 
+// Direct (non-commitment) costs for a project, grouped by cost code.
+// CloudLedger returns actual GL costs posted to the project that are NOT
+// subcontractor commitment billings (those come from Turnkey pay apps).
+// Expected shape:
+//   { as_of, project_id, lines: [{ cost_code, amount }], total }
+// The Cost Report calls this best-effort: if CL is disabled/unreachable or the
+// endpoint isn't live yet, Direct Costs simply show as 0 and the rest of the
+// report still renders.
+async function getDirectCosts(turnkeyProjectId, asOfDate) {
+  const qs = asOfDate ? ('?as_of=' + encodeURIComponent(asOfDate)) : '';
+  return clGet('/api/turnkey/projects/' + turnkeyProjectId + '/direct-costs' + qs);
+}
+
 // Returns the Excel buffer for download passthrough (Turnkey wraps this in a route)
 async function getWipScheduleXlsxBuffer(asOfDate) {
   if (!isEnabled()) throw new Error('CloudLedger integration disabled');
@@ -138,4 +151,5 @@ module.exports = {
   trySync,
   getWipScheduleJson,
   getWipScheduleXlsxBuffer,
+  getDirectCosts,
 };

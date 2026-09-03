@@ -106,7 +106,9 @@ function drawG702(doc, { payApp, project, vendor, issuerName }) {
   const priorTotal = Number(payApp.prior_total || 0);
   const priorNet = priorTotal * (1 - retainagePct / 100);
   const currentDue = Number(payApp.current_due || 0);
-  const balanceToFinish = Math.max(0, contractToDate - totalCompleted);
+  // G702 Line 9 = Line 3 - Line 6 (contract sum to date less TOTAL EARNED LESS
+  // RETAINAGE). Subtracting Line 4 instead understates it by the retainage held.
+  const balanceToFinish = Math.max(0, contractToDate - earnedLessRet);
 
   const rows = [
     ['1.  ORIGINAL CONTRACT SUM',                         fmtMoney(cs),             false],
@@ -114,10 +116,10 @@ function drawG702(doc, { payApp, project, vendor, issuerName }) {
     ['3.  CONTRACT SUM TO DATE  (Line 1 ± 2)',            fmtMoney(contractToDate), true],
     ['4.  TOTAL COMPLETED & STORED TO DATE',              fmtMoney(totalCompleted), false],
     [`5.  RETAINAGE  (${retainagePct}% of Line 4)`,       fmtMoney(retainageAmt),   false],
-    ['6.  TOTAL EARNED LESS RETAINAGE  (Line 4 − 5)',     fmtMoney(earnedLessRet),  true],
+    ['6.  TOTAL EARNED LESS RETAINAGE  (Line 4 - 5)',     fmtMoney(earnedLessRet),  true],
     ['7.  LESS PREVIOUS CERTIFICATES (net of retainage)', '(' + fmtMoney(priorNet) + ')', false],
-    ['8.  CURRENT PAYMENT DUE  (Line 6 − 7)',             fmtMoney(currentDue),     true],
-    ['9.  BALANCE TO FINISH, INCLUDING RETAINAGE',        fmtMoney(balanceToFinish), false],
+    ['8.  CURRENT PAYMENT DUE  (Line 6 - 7)',             fmtMoney(currentDue),     true],
+    ['9.  BALANCE TO FINISH, INCLUDING RETAINAGE  (Line 3 - 6)', fmtMoney(balanceToFinish), false],
   ];
 
   doc.lineWidth(0.75).strokeColor('#333')

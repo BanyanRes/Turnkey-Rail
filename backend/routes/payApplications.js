@@ -53,6 +53,10 @@ function withTotals(db, header) {
   // prior payments (net of retainage)
   const prior_net = prior_total * (1 - retainage_pct / 100);
   const current_due = earned_less_retainage - prior_net;
+  // G702 Line 9: contract sum to date (Line 3) less total earned less retainage
+  // (Line 6) — so the retainage still held stays inside "balance to finish".
+  const contract_sum_to_date = Number(header.contract_sum || 0) + Number(header.change_orders || 0);
+  const balance_to_finish = Math.max(0, contract_sum_to_date - earned_less_retainage);
 
   return {
     ...header,
@@ -65,6 +69,8 @@ function withTotals(db, header) {
     retainage_amount,
     earned_less_retainage,
     current_due,
+    contract_sum_to_date,
+    balance_to_finish,
   };
 }
 
